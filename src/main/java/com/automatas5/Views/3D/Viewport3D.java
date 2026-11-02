@@ -6,7 +6,7 @@ import imgui.flag.ImGuiButtonFlags;
 import imgui.flag.ImGuiStyleVar;
 import imgui.flag.ImGuiWindowFlags;
 import org.lwjgl.glfw.GLFW;
-
+import imgui.ImDrawList;
 import java.nio.ByteBuffer;
 
 import static org.lwjgl.opengl.GL30.*;
@@ -76,6 +76,16 @@ public class Viewport3D {
     private boolean numpad0WasDown, numpad1WasDown;
     private float aspect = 1f;
 
+
+    // Posición/tamaño del viewport en pantalla (para el picking)
+    private float viewX, viewY, viewW = 1f, viewH = 1f;
+
+    // Selección
+    private static final float PICK_RADIUS = 12f; // píxeles
+    private boolean hasSelection;
+    private int selX, selY;
+    private int selVao, selVbo;
+
     /**
      * @param window       GLFW window handle (needed to read the numpad / modifier keys)
      * @param subdivisions initial subdivisions per side of the plane
@@ -111,8 +121,20 @@ public class Viewport3D {
         uColor = glGetUniformLocation(program, "uColor");
         uLit = glGetUniformLocation(program, "uLit");
 
+        selVao = glGenVertexArrays();
+        selVbo = glGenBuffers();
+        glBindVertexArray(selVao);
+        glBindBuffer(GL_ARRAY_BUFFER, selVbo);
+        int stride = 6 * Float.BYTES;
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0L);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, false, stride, 3L * Float.BYTES);
+        glBindVertexArray(0);
+
         terrain.initGL();
         initialized = true;
+        
     }
 
     /** Releases all GPU resources. */
@@ -120,6 +142,9 @@ public class Viewport3D {
         if (!initialized) return;
         terrain.dispose();
         glDeleteProgram(program);
+        glDeleteVertexArrays(selVao);
+        glDeleteBuffers(selVbo);
+        
         if (fbo != 0) {
             glDeleteFramebuffers(fbo);
             glDeleteTextures(colorTex);
@@ -165,6 +190,7 @@ public class Viewport3D {
         // invisible button so clicks don't drag the ImGui window.
         ImVec2 pos = ImGui.getCursorScreenPos();
         float px = pos.x, py = pos.y;
+        viewX = px; viewY = py; viewW = w; viewH = h;
         ImGui.image(colorTex, w, h, 0f, 1f, 1f, 0f);
         ImGui.setCursorScreenPos(px, py);
         ImGui.invisibleButton("##viewport3d", w, h,
@@ -173,6 +199,7 @@ public class Viewport3D {
 
         handleInput(hovered, h);
         renderScene();
+        drawSelectionOverlay(hovered); 
     }
 
     // ------------------------------------------------------------------
@@ -220,9 +247,92 @@ public class Viewport3D {
     /** Direct access to the mesh (worldX/worldZ helpers, bounds checks, etc.). */
     public TerrainMesh getTerrain() { return terrain; }
 
+    /**
+     * Coloca el vértice (x = columna, y = fila) a una altura entera.
+     * 0 = altura inicial; positivas y negativas permitidas.
+     * @return false si la coordenada está fuera de la malla.
+     */
+    public boolean setVertexHeight(int x, int y, int height) {
+        return terrain.setVertexHeight(x, y, height);
+    }
+
+    /** Altura actual del vértice (x = columna, y = fila), redondeada a entero. */
+    public int getVertexHeight(int x, int y) {
+        return Math.round(terrain.getHeight(x, y));
+    }
+
+    /** @return {columna, fila} del vértice seleccionado, o null si no hay selección. */
+    public int[] getSelectedVertex() {
+        if (!hasSelection || !terrain.inBounds(selX, selY)) return null;
+        return new int[] { selX, selY };
+    }
+
+    public void clearSelection() { hasSelection = false; }
+
+    /**
+     * Convierte la posición actual del mouse en una coordenada de vértice.
+     * @param radiusPixels distancia máxima (en píxeles) entre el mouse y el vértice
+     * @return {columna, fila} o null si el mouse no está sobre el viewport
+     *         o no hay ningún vértice dentro del radio.
+     */
+    public int[] pickVertex(float radiusPixels) {
+        ImVec2 m = ImGui.getMousePos();
+        return pickVertexAt(m.x, m.y, radiusPixels);
+    }
+
+    public boolean addVertexHeight(int x, int y, int delta) {
+        return terrain.addVertexHeight(x, y, delta);
+    }
     // ------------------------------------------------------------------
     // Input
     // ------------------------------------------------------------------
+
+    /**
+ * Igual que pickVertex, pero con coordenadas de pantalla explícitas
+ * (las mismas que ImGui.getMousePos()).
+ */
+public int[] pickVertexAt(float mouseX, float mouseY, float radiusPixels) {
+    float lx = mouseX - viewX;
+    float ly = mouseY - viewY;
+    if (lx < 0 || ly < 0 || lx > viewW || ly > viewH) return null;
+
+    float[] mvp = OrbitCamera.multiply(camera.projectionMatrix(aspect), camera.viewMatrix());
+
+    int cells = terrain.getSubdivisions();
+    int n = cells + 1;
+    float size = terrain.getPlaneSize();
+    float step = size / cells;
+    float half = size / 2f;
+
+    float bestD2 = radiusPixels * radiusPixels;
+    int bestX = -1, bestY = -1;
+
+    for (int iz = 0; iz < n; iz++) {
+        float z = -half + iz * step;
+        for (int ix = 0; ix < n; ix++) {
+            float x = -half + ix * step;
+            float y = terrain.getHeight(ix, iz);
+
+            float cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+            if (cw <= 0f) continue; // detrás de la cámara
+            float cx = mvp[0] * x + mvp[4] * y + mvp[8]  * z + mvp[12];
+            float cy = mvp[1] * x + mvp[5] * y + mvp[9]  * z + mvp[13];
+
+            float sx = (cx / cw * 0.5f + 0.5f) * viewW;
+            float sy = (0.5f - cy / cw * 0.5f) * viewH; // y de pantalla va hacia abajo
+
+            float dx = sx - lx, dy = sy - ly;
+            float d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) {
+                bestD2 = d2;
+                bestX = ix;
+                bestY = iz;
+            }
+        }
+    }
+    return bestX < 0 ? null : new int[] { bestX, bestY };
+}
+
 
     private void handleInput(boolean hovered, int viewportHeight) {
         ImVec2 mouse = ImGui.getMousePos();
@@ -326,6 +436,22 @@ public class Viewport3D {
         setEnabled(GL_SCISSOR_TEST, prevScissor);
         setEnabled(GL_BLEND, prevBlend);
         setEnabled(GL_DEPTH_TEST, prevDepth);
+
+        if (hasSelection && terrain.inBounds(selX, selY)) {
+            float[] v = {
+                terrain.worldX(selX), terrain.getHeight(selX, selY), terrain.worldZ(selY),
+                0f, 1f, 0f
+            };
+            glBindVertexArray(selVao);
+            glBindBuffer(GL_ARRAY_BUFFER, selVbo);
+            glBufferData(GL_ARRAY_BUFFER, v, GL_DYNAMIC_DRAW);
+            glDisable(GL_DEPTH_TEST);
+            glPointSize(10f);
+            glUniform4f(uColor, 1f, 0.6f, 0.1f, 1f);
+            glUniform1i(uLit, 0);
+            glDrawArrays(GL_POINTS, 0, 1);
+        }
+
     }
 
     private void resizeFramebuffer(int w, int h) {
@@ -377,4 +503,53 @@ public class Viewport3D {
         if (enabled) glEnable(cap);
         else glDisable(cap);
     }
+
+    /** Posición en pantalla (coordenadas ImGui absolutas) del vértice, o null si está detrás de la cámara. */
+private float[] projectVertex(int ix, int iz, float[] mvp) {
+    float x = terrain.worldX(ix);
+    float y = terrain.getHeight(ix, iz);
+    float z = terrain.worldZ(iz);
+
+    float cw = mvp[3] * x + mvp[7] * y + mvp[11] * z + mvp[15];
+    if (cw <= 0f) return null;
+    float cx = mvp[0] * x + mvp[4] * y + mvp[8]  * z + mvp[12];
+    float cy = mvp[1] * x + mvp[5] * y + mvp[9]  * z + mvp[13];
+
+    return new float[] {
+        viewX + (cx / cw * 0.5f + 0.5f) * viewW,
+        viewY + (0.5f - cy / cw * 0.5f) * viewH
+    };
+}
+
+private void drawSelectionOverlay(boolean hovered) {
+    ImDrawList dl = ImGui.getWindowDrawList();
+    float[] mvp = OrbitCamera.multiply(camera.projectionMatrix(aspect), camera.viewMatrix());
+
+    // Vista previa: vértice bajo el mouse (amarillo, hueco)
+    if (hovered) {
+        int[] h = pickVertex(PICK_RADIUS);
+        if (h != null) {
+            float[] p = projectVertex(h[0], h[1], mvp);
+            if (p != null) {
+                dl.addCircle(p[0], p[1], 7f, ImGui.getColorU32(1f, 1f, 0.2f, 1f), 16, 2f);
+                dl.addText(p[0] + 10, p[1] - 18, ImGui.getColorU32(1f, 1f, 0.6f, 1f),
+                        "(" + h[0] + ", " + h[1] + ")");
+            }
+            if (ImGui.isMouseClicked(0)) {   // <-- clic = seleccionar
+                selX = h[0];
+                selY = h[1];
+                hasSelection = true;
+            }
+        }
+    }
+
+    // Seleccionado (naranja, relleno)
+    if (hasSelection && terrain.inBounds(selX, selY)) {
+        float[] p = projectVertex(selX, selY, mvp);
+        if (p != null) {
+            dl.addCircleFilled(p[0], p[1], 6f, ImGui.getColorU32(1f, 0.6f, 0.1f, 1f), 16);
+            dl.addCircle(p[0], p[1], 7f, ImGui.getColorU32(0f, 0f, 0f, 1f), 16, 2f);
+        }
+    }
+}
 }

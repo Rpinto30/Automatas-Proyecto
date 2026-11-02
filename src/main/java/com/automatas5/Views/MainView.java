@@ -8,7 +8,7 @@ public class MainView extends Application {
     
    
     private Viewport3D viewport;
-
+    private final imgui.type.ImInt heightInput = new imgui.type.ImInt(4);
     
     @Override
     protected void configure(Configuration config) {
@@ -31,30 +31,35 @@ public class MainView extends Application {
     //render loop
     @Override
     public void process() {
-       
-        ImGui.begin("Hola Mundo ImGui");
-            ImGui.text("¡Bienvenido a Dear ImGui en Java!");
-            if (ImGui.button("Haz clic aquí")) {
-                System.out.println("¡Botón presionado!");
-                viewport.increaseSubdivisions(2);
+        ImGui.begin("Herramientas");
+
+        int[] v = viewport.getSelectedVertex();
+        if (v != null) {
+            ImGui.text("Vértice: columna " + v[0] + ", fila " + v[1]);
+            ImGui.text("Altura actual: " + viewport.getVertexHeight(v[0], v[1]));
+        } else {
+            ImGui.text("Ningún vértice seleccionado (clic izquierdo en el terreno)");
+        }
+
+        ImGui.inputInt("Altura", heightInput);
+
+        if (v != null) {
+            if (ImGui.button("Fijar altura")) {
+                viewport.setVertexHeight(v[0], v[1], heightInput.get());
             }
+            ImGui.sameLine();
+            if (ImGui.button("Subir")) {
+                viewport.addVertexHeight(v[0], v[1], heightInput.get());
+            }
+        }
         ImGui.end();
 
-       
-        if (viewport != null) {
-            viewport.showWindow("Terreno"); 
-        }
+        viewport.showWindow("Terreno");
+    }
 
-        /* 
-        NOTA Opcional: Si en lugar de usar 'showWindow' prefieres controlar la ventana desde aquí,
-        puedes hacerlo de esta forma (descoméntalo si 'viewport.render()' solo contiene el ImGui.image):
-        
-        if (ImGui.begin("Mi ventana 3D")) {
-            if (viewport != null) {
-                viewport.render();
-            }
-            ImGui.end();
-        }
-        */
+    @Override
+    protected void dispose() {
+        if (viewport != null) viewport.dispose();
+        super.dispose();
     }
 }

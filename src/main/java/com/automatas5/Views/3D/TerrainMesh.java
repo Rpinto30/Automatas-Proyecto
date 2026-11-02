@@ -265,4 +265,23 @@ public class TerrainMesh {
     private static int clampCells(int c) {
         return Math.max(MIN_CELLS, Math.min(MAX_CELLS, c));
     }
+
+    /**
+     * Coloca el vértice (x = columna, y = fila) a la altura indicada.
+     * 0 es la altura inicial; se aceptan valores positivos y negativos.
+     * @return true si el vértice existe y fue modificado, false si está fuera de rango.
+     */
+    public boolean setVertexHeight(int x, int y, int height) {
+        if (!inBounds(x, y)) return false;
+        heights[y * (cells + 1) + x] = height;
+        heightsDirty = true;   // la GPU se actualiza en el siguiente draw()
+        return true;
+    }
+
+    public boolean addVertexHeight(int x, int y, int delta) {
+    if (!inBounds(x, y)) return false;
+    heights[y * (cells + 1) + x] += delta;
+    heightsDirty = true;
+    return true;
+}
 }
