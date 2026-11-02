@@ -1,6 +1,7 @@
 package com.automatas5.Views;
 
-import com.automatas5.structs.*;
+import com.automatas5.Views.Dimension.Viewport3D;
+import com.automatas5.structs.Matrix;
 
 import imgui.ImGui;
 import imgui.app.Application;
