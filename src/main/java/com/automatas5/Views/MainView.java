@@ -1,15 +1,20 @@
 package com.automatas5.Views;
 
+import com.automatas5.structs.*;
+
 import imgui.ImGui;
 import imgui.app.Application;
 import imgui.app.Configuration;
 
 public class MainView extends Application {
     
-   
     private Viewport3D viewport;
     private final imgui.type.ImInt heightInput = new imgui.type.ImInt(4);
     
+    //Structs
+    private int cells;
+    private Matrix matrix; 
+
     @Override
     protected void configure(Configuration config) {
         config.setTitle("Mi Ventana con ImGui en Java");
@@ -24,7 +29,10 @@ public class MainView extends Application {
 
         long windowHandle = getHandle(); 
 
-        viewport = new Viewport3D(windowHandle, 32, 20f);
+        this.cells = 16;
+        matrix = new Matrix(this.cells);
+
+        viewport = new Viewport3D(windowHandle, this.cells, 20f);
         viewport.init(); 
     }
 
