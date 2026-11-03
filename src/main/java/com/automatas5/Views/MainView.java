@@ -1,18 +1,28 @@
 package com.automatas5.Views;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+
+import org.lwjgl.glfw.GLFW;
+
 import com.automatas5.Views.Dimension.Viewport3D;
+import com.automatas5.process.Automate;
+import com.automatas5.process.Persistent;
+import com.automatas5.process.Tools;
 import com.automatas5.structs.Graph;
+import com.automatas5.structs.Matrix;
+
+import imgui.ImDrawList;
 import imgui.ImGui;
+import imgui.ImVec2;
 import imgui.app.Application;
 import imgui.app.Configuration;
 import imgui.flag.ImGuiCol;
 import imgui.flag.ImGuiInputTextFlags;
 import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImInt;
-import org.lwjgl.glfw.GLFW;
-
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
 
 /**
  * Ventana principal 1280x720.
@@ -29,20 +39,28 @@ public class MainView extends Application {
         void onPaint(int radius, double force, Tool tool);
     }
 
+    /** Tamano inicial de la ventana; despues se puede redimensionar libremente. */
     public static final int WIDTH = 1280;
     public static final int HEIGHT = 720;
+    /** Tamano minimo para que los paneles sigan siendo usables. */
+    private static final int MIN_WIDTH = 900;
+    private static final int MIN_HEIGHT = 600;
 
     private static final int MIN_RES = 2;
     private static final int MAX_RES = 100;
 
     // ---- estado de los widgets ----
     private final ImInt resolution = new ImInt(25);
-    private final int[] radius = {5};          // 1..10, solo enteros
+    private final int[] radius = {2};          // 1..10, solo enteros
     private final float[] force = {0.5f};      // -1..1
     private Tool tool = Tool.MOUSE;
 
     // ---- piezas conectadas ----
     private final GraphView graphView;
+    private final Graph graph;
+    private final Matrix matrix;
+    /** Une Grafo + Matriz dispersa + Viewport3D (Dijkstra y suavizado). */
+    private final Tools tools;
     /** Viewer 3D: se crea en el primer frame porque necesita el handle de la ventana GLFW. */
     private Viewport3D viewport;
 
@@ -56,8 +74,24 @@ public class MainView extends Application {
     /** Contenido extra del dashboard (p. ej. caracteres de la matriz dispersa). */
     private Runnable dashboardExtra = () -> { };
 
-    public MainView(Graph graph) {
+
+    // ---- estado del pincel (evita repintar el mismo vertice cada frame) ----
+    private static final float PICK_RADIUS = 12f;      // px, igual que Viewport3D
+    private static final float DRAG_MIN_PIXELS = 6f;   // el mouse debe moverse para pintar otro vertice
+    private int[] lastPainted = null;
+    /** Resultado de la ultima exportacion .obj (se muestra bajo el viewer). */
+    private String exportMessage = "";
+    private boolean exportFailed = false;
+    private float lastPaintMouseX, lastPaintMouseY;
+
+    public MainView(Graph graph, Matrix matrix_) {
+        this.graph = graph;
         this.graphView = new GraphView(graph);
+        Persistent.loadGraph(graphView); // init.graph: se lee solo al iniciar
+        this.matrix = matrix_;
+        this.tools = new Tools(graph, matrix_);
+        // por defecto el pincel/borrador ejecutan el automata; setOnPaint() puede reemplazarlo
+        this.onPaint = (r, f, t) -> tools.ModificateTerrain(r, f, t != Tool.ERASER);
     }
 
     // ------------------------------------------------------------------
@@ -71,6 +105,10 @@ public class MainView extends Application {
 
     /** Viewer 3D (null hasta que se dibuja el primer frame). Util para Tools: getSelectedVertex(), addVertexHeight()... */
     public Viewport3D getViewport() { return viewport; }
+
+    public Tools getTools() { return tools; }
+    public Graph getGraph() { return graph; }
+    public Matrix getMatrix() { return matrix; }
 
     public int getResolution() { return resolution.get(); }
     public int getRadius() { return radius[0]; }
@@ -112,11 +150,16 @@ public class MainView extends Application {
     protected void preRun() {
         // ventana de 1280x720 (el tamano por defecto de Application es distinto)
         GLFW.glfwSetWindowSize(getHandle(), WIDTH, HEIGHT);
+        // ventana redimensionable, con un minimo
+        GLFW.glfwSetWindowAttrib(getHandle(), GLFW.GLFW_RESIZABLE, GLFW.GLFW_TRUE);
+        GLFW.glfwSetWindowSizeLimits(getHandle(), MIN_WIDTH, MIN_HEIGHT, GLFW.GLFW_DONT_CARE, GLFW.GLFW_DONT_CARE);
     }
 
     @Override
     protected void postRun() {
         System.out.println("[MainView] postRun: cerrando");
+        // init.graph: se escribe solo al terminar la sesion
+        Persistent.saveGraph(graphView);
         // liberar los recursos de OpenGL del viewer al cerrar la ventana
         if (viewport != null) viewport.dispose();
     }
@@ -132,8 +175,11 @@ public class MainView extends Application {
     // ------------------------------------------------------------------
 
     public void render() {
+        // el panel principal ocupa siempre toda la ventana (se adapta al redimensionar)
+        float winW = Math.max(1f, ImGui.getIO().getDisplaySizeX());
+        float winH = Math.max(1f, ImGui.getIO().getDisplaySizeY());
         ImGui.setNextWindowPos(0, 0);
-        ImGui.setNextWindowSize(WIDTH, HEIGHT);
+        ImGui.setNextWindowSize(winW, winH);
         int flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize
                 | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse;
 
@@ -153,6 +199,7 @@ public class MainView extends Application {
             renderRight(rightW, totalH);
             ImGui.endChild();
         }
+
         ImGui.end();
     }
 
@@ -169,13 +216,14 @@ public class MainView extends Application {
         if (ImGui.inputInt("##res", resolution, 0, 0, ImGuiInputTextFlags.EnterReturnsTrue)) {
             resolution.set(Math.max(MIN_RES, Math.min(MAX_RES, resolution.get())));
             if (viewport != null) viewport.setSubdivisions(resolution.get());
+            rebuildMatrixFromTerrain();
             onResolutionChange.accept(resolution.get());
         }
         ImGui.nextColumn();
 
         ImGui.text("Radio");
         ImGui.setNextItemWidth(-1);
-        ImGui.sliderInt("##radio", radius, 1, 10);
+        ImGui.sliderInt("##radio", radius, 1, 11);
         ImGui.nextColumn();
 
         ImGui.text("Fuerza");
@@ -192,7 +240,8 @@ public class MainView extends Application {
 
         // ---- espacio del editor 3D ----
         float toolbarH = 48f;
-        float viewH = ImGui.getContentRegionAvailY() - toolbarH;
+        float infoH = ImGui.getTextLineHeightWithSpacing() * 2f + 4f;
+        float viewH = Math.max(60f, ImGui.getContentRegionAvailY() - toolbarH - infoH);
         float viewW = ImGui.getContentRegionAvailX();
 
         // Viewport3D se dibuja llenando el espacio del child (sin scroll)
@@ -203,31 +252,135 @@ public class MainView extends Application {
         } else {
             if (viewport == null) {
                 viewport = new Viewport3D(getHandle(), resolution.get(), 10f);
+                tools.setViewport(viewport);
+                rebuildMatrixFromTerrain(); // matriz = (celdas + 1) x (celdas + 1) vertices
             }
             viewport.render();
         }
         boolean viewerHovered = ImGui.isWindowHovered();
         ImGui.endChild();
 
-        // pintar / borrar mientras se mantiene el clic sobre el viewer
-        if (tool != Tool.MOUSE && viewerHovered && ImGui.isMouseDown(0)) {
-            onPaint.onPaint(radius[0], getEffectiveForce(), tool);
-        }
+        handlePainting(viewerHovered);
+
+        // ---- info del vertice seleccionado + mensajes del automata ----
+        renderSelectionInfo();
 
         // ---- panel de herramientas (stack horizontal) ----
         renderToolbar(viewW);
     }
 
+    /**
+     * Pinta/borra con clic o arrastre. Cada vertice se procesa UNA vez por pasada: el Dijkstra parte del
+     * simbolo que ya tiene el vertice, asi que repetirlo cada frame destruiria el suavizado.
+     */
+    private void handlePainting(boolean viewerHovered) {
+        boolean down = ImGui.isMouseDown(0);
+        if (!down) {
+            lastPainted = null;
+            return;
+        }
+        if (viewport == null || tool == Tool.MOUSE || !viewerHovered) return;
+
+        boolean click = ImGui.isMouseClicked(0);
+        ImVec2 m = ImGui.getMousePos();
+        float mx = m.x, my = m.y;
+
+        boolean moved = lastPainted == null
+                || Math.hypot(mx - lastPaintMouseX, my - lastPaintMouseY) >= DRAG_MIN_PIXELS;
+        if (!click && !moved) return;
+
+        int[] h = viewport.pickVertex(PICK_RADIUS);
+        if (h == null) return;
+        boolean same = lastPainted != null && lastPainted[0] == h[0] && lastPainted[1] == h[1];
+        if (same && !click) return;
+
+        viewport.selectVertex(h[0], h[1]);
+        exportMessage = "";
+        onPaint.onPaint(radius[0], getEffectiveForce(), tool);
+        lastPainted = h;
+        lastPaintMouseX = mx;
+        lastPaintMouseY = my;
+    }
+
+    /** Linea 1: vertice, altura y simbolo. Linea 2: aviso del automata (ruta inexistente, estado faltante...). */
+    private void renderSelectionInfo() {
+        int[] v = (viewport != null) ? viewport.getSelectedVertex() : null;
+        if (v != null) {
+            ImGui.text("Vertice (" + v[0] + ", " + v[1] + ")  altura " + viewport.getVertexHeight(v[0], v[1])
+                    + "  simbolo " + symbolLabel(symbolAt(v[0], v[1])));
+        } else {
+            ImGui.text("Sin vertice seleccionado (clic en el terreno)");
+        }
+        String msg = tools.getLastMessage();
+        if (!msg.isEmpty()) ImGui.textColored(1f, 0.6f, 0.3f, 1f, msg);
+        else if (!exportMessage.isEmpty()) {
+            if (exportFailed) ImGui.textColored(1f, 0.4f, 0.4f, 1f, exportMessage);
+            else ImGui.textColored(0.5f, 0.9f, 0.5f, 1f, exportMessage);
+        } else ImGui.text("");
+    }
+
+    /** Simbolo guardado en la matriz dispersa; celda vacia (null) = ':' (altura 0). */
+    private char symbolAt(int x, int y) {
+        if (x < 0 || y < 0 || x >= matrix.getSize() || y >= matrix.getSize()) return ':';
+        char c = matrix.getInCoord(x, y);
+        return c == '\0' ? ':' : c;
+    }
+
+    private static String symbolLabel(char c) {
+        return c == ' ' ? "(espacio)" : "'" + c + "'";
+    }
+
+    /**
+     * Deja la matriz dispersa con (celdas + 1)^2 vertices y la rellena desde las alturas del terreno
+     * (el resample bilineal del viewer al cambiar la resolucion no conserva los simbolos).
+     */
+    private void rebuildMatrixFromTerrain() {
+        matrix.clear();
+        int cells = (viewport != null) ? viewport.getSubdivisions() : resolution.get();
+        int n = cells + 1;
+        matrix.setNewSize(n);
+        if (viewport == null) return;
+        for (int y = 0; y < n; y++) {
+            for (int x = 0; x < n; x++) {
+                char c = Automate.GetCharByHeight(viewport.getVertexHeight(x, y));
+                if (c != ':') matrix.insertInCoord(x, y, c);
+            }
+        }
+        lastPainted = null;
+    }
+
     private void renderToolbar(float panelW) {
         float btnW = 100f;
-        float startX = (panelW - btnW * 3 - ImGui.getStyle().getItemSpacingX() * 2) / 2f;
-        ImGui.setCursorPosX(Math.max(0f, startX));
+        float exportW = 120f;
+        float gap = ImGui.getStyle().getItemSpacingX();
+        float total = btnW * 3 + exportW + gap * 3;
+        ImGui.setCursorPosX(Math.max(0f, (panelW - total) / 2f));
 
         toolButton("Mouse", Tool.MOUSE, btnW);
         ImGui.sameLine();
         toolButton("Pincel", Tool.BRUSH, btnW);
         ImGui.sameLine();
         toolButton("Borrador", Tool.ERASER, btnW);
+        ImGui.sameLine();
+        // no es una herramienta: ejecuta una accion y no cambia la herramienta activa
+        if (ImGui.button("Exportar .obj", exportW, 34f)) exportTerrain();
+    }
+
+    /** Exporta el terreno actual a exports/terreno_<fecha>.obj y deja el resultado en exportMessage. */
+    private void exportTerrain() {
+        if (viewport == null) {
+            exportMessage = "El viewer 3D aun no esta listo.";
+            exportFailed = true;
+            return;
+        }
+        try {
+            Path file = Persistent.exportObj(viewport.getTerrain());
+            exportMessage = "Exportado: " + file;
+            exportFailed = false;
+        } catch (IOException ex) {
+            exportMessage = "No se pudo exportar: " + ex.getMessage();
+            exportFailed = true;
+        }
     }
 
     private void toolButton(String text, Tool t, float w) {
@@ -264,9 +417,70 @@ public class MainView extends Application {
         ImGui.text("Q = " + graphView.getStatesLabel());
         ImGui.textWrapped("lenguaje (sigma) = " + graphView.getLanguageLabel());
         ImGui.text("Cantidad de estados: " + graphView.getStateCount());
-        // Estado actual: conectar cuando exista en el automata
-        ImGui.text("Estado actual: -");
+        // Estado actual = simbolo del vertice seleccionado
+        int[] sel = (viewport != null) ? viewport.getSelectedVertex() : null;
+        ImGui.text("Estado actual: " + (sel != null ? symbolLabel(symbolAt(sel[0], sel[1])) : "-"));
         ImGui.separator();
-        dashboardExtra.run(); // aqui va el recorrido de la matriz dispersa
+        dashboardExtra.run();
+        renderMatrixView();
+    }
+
+    /**
+     * Panel inferior derecho: cadena de la matriz dispersa = vista superior del terreno con simbolos.
+     * Filas = y (de arriba hacia abajo), columnas = x; celda vacia (null) se muestra como ':'.
+     * Cada celda se dibuja en una rejilla fija (la fuente no es monoespaciada) y solo las visibles.
+     */
+    private void renderMatrixView() {
+        int n = matrix.getSize();
+        ImGui.text("Matriz dispersa " + n + "x" + n + " (vista superior, null = ':')");
+
+        float cellW = ImGui.calcTextSize("W").x + 3f;
+        float cellH = ImGui.getTextLineHeight() + 1f;
+
+        ImGui.beginChild("##matrixView", 0, 0, true, ImGuiWindowFlags.HorizontalScrollbar);
+
+        ImVec2 o = ImGui.getCursorScreenPos();
+        float ox = o.x, oy = o.y;
+        ImVec2 wp = ImGui.getWindowPos();
+        float wx = wp.x, wy = wp.y;
+        float ww = ImGui.getWindowWidth(), wh = ImGui.getWindowHeight();
+
+        ImGui.dummy(n * cellW, n * cellH); // fija el area desplazable
+
+        int c0 = Math.max(0, (int) Math.floor((wx - ox) / cellW));
+        int c1 = Math.min(n - 1, (int) Math.ceil((wx + ww - ox) / cellW));
+        int r0 = Math.max(0, (int) Math.floor((wy - oy) / cellH));
+        int r1 = Math.min(n - 1, (int) Math.ceil((wy + wh - oy) / cellH));
+
+        ImDrawList dl = ImGui.getWindowDrawList();
+        int textCol = ImGui.getColorU32(0.92f, 0.92f, 0.92f, 1f);
+        int dimCol = ImGui.getColorU32(0.5f, 0.5f, 0.5f, 1f);
+
+        for (int y = r0; y <= r1; y++) {
+            for (int x = c0; x <= c1; x++) {
+                char c = matrix.getInCoord(x, y);
+                boolean empty = (c == '\0');
+                if (empty) c = ':';
+
+                float px = ox + x * cellW, py = oy + y * cellH;
+                int h = Automate.GetHeightByChar(c);
+                if (h != 0) {
+                    float t = Math.abs(h) / 5f * 0.55f;   // azul = bajo, naranja = alto (tambien marca el ' ')
+                    int bg = (h < 0) ? ImGui.getColorU32(0.2f, 0.4f, 0.9f, t)
+                                     : ImGui.getColorU32(0.95f, 0.5f, 0.2f, t);
+                    dl.addRectFilled(px, py, px + cellW, py + cellH, bg);
+                }
+                dl.addText(px + 1.5f, py, empty ? dimCol : textCol, String.valueOf(c));
+            }
+        }
+
+        // vertice seleccionado en el 3D
+        int[] sel = (viewport != null) ? viewport.getSelectedVertex() : null;
+        if (sel != null && sel[0] < n && sel[1] < n) {
+            float px = ox + sel[0] * cellW, py = oy + sel[1] * cellH;
+            dl.addRect(px, py, px + cellW, py + cellH, ImGui.getColorU32(1f, 0.6f, 0.1f, 1f));
+        }
+
+        ImGui.endChild();
     }
 }

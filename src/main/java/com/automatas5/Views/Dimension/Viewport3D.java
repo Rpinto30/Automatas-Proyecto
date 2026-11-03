@@ -363,6 +363,15 @@ public class Viewport3D {
 
     public void clearSelection() { hasSelection = false; }
 
+    /** Selecciona por codigo el vertice (x = columna, y = fila). @return false si esta fuera de la malla. */
+    public boolean selectVertex(int x, int y) {
+        if (!terrain.inBounds(x, y)) return false;
+        selX = x;
+        selY = y;
+        hasSelection = true;
+        return true;
+    }
+
     /**
      * Convierte la posición actual del mouse en una coordenada de vértice.
      * @param radiusPixels distancia máxima (en píxeles) entre el mouse y el vértice

@@ -1,12 +1,14 @@
 package com.automatas5;
-import com.automatas5.structs.Graph; // TODO - debe importarse el nombre con el que la clase Graph chambee
-import  com.automatas5.Views.*;
+import com.automatas5.Views.MainView;
+import com.automatas5.structs.Graph;
+import  com.automatas5.structs.Matrix;
 
 public class Main {
     public static void main(String[] args) {
         System.out.println("Iniciando aplicación...");
-        Graph graph = new Graph(); // TODO - crear un grafo vacío o con datos de prueba
-        MainView view = new MainView(graph);
+        Matrix matrix = new Matrix(25);
+        Graph graph = new Graph();
+        MainView view = new MainView(graph, matrix);
         
         // 1) Resolucion: se llama al dar Enter en el campo
         view.setOnResolutionChange(res -> {

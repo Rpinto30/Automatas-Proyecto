@@ -1,6 +1,12 @@
 package com.automatas5.Views;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import com.automatas5.structs.Graph;
+
 import imgui.ImColor;
 import imgui.ImDrawList;
 import imgui.ImGui;
@@ -8,9 +14,6 @@ import imgui.ImVec2;
 import imgui.flag.ImGuiCol;
 import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImString;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Editor visual del AFD (grafo de Diego).
@@ -92,6 +95,95 @@ public class GraphView {
             sb.append(label(ALPHABET[i]));
         }
         return sb.append(" }").toString();
+    }
+
+    // ------------------------------------------------------------------
+    // Persistencia (la usa Persistent: init.graph)
+    // ------------------------------------------------------------------
+
+    /** Copia inmutable de un nodo de la UI. */
+    public static class NodeState {
+        public final String name;
+        public final char value;
+        public final float x, y;
+
+        public NodeState(String name, char value, float x, float y) {
+            this.name = name;
+            this.value = value;
+            this.x = x;
+            this.y = y;
+        }
+    }
+
+    public List<NodeState> getNodeStates() {
+        List<NodeState> out = new ArrayList<>();
+        for (UINode n : nodes) out.add(new NodeState(n.name, n.value, n.x, n.y));
+        return out;
+    }
+
+    /** Aristas (no dirigidas) como pares {nombreA, nombreB}, cada una una sola vez. */
+    public List<String[]> getEdges() {
+        List<String[]> out = new ArrayList<>();
+        for (UINode a : nodes) {
+            for (String other : a.links) {
+                UINode b = find(other);
+                if (b != null && nodes.indexOf(a) < nodes.indexOf(b)) {
+                    out.add(new String[] { a.name, b.name });
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Reemplaza el automata actual por el recibido (nodos de la UI + Graph sincronizado).
+     * Ignora lo invalido: simbolos fuera del alfabeto, repetidos, nombres duplicados o aristas a nodos inexistentes.
+     * @return cantidad de nodos cargados
+     */
+    public int loadState(List<NodeState> states, List<String[]> edges) {
+        // limpiar lo que hubiera, tambien en el Graph
+        for (UINode old : new ArrayList<>(nodes)) {
+            final char v = old.value;
+            safeGraph(() -> graph.DeleteNode(v));
+        }
+        nodes.clear();
+        selected = null;
+        dragging = null;
+        connectOrigin = null;
+        mode = Mode.SELECT;
+        statusMsg = "";
+        nextId = 0;
+
+        String alphabet = new String(ALPHABET);
+        Pattern idPattern = Pattern.compile("q(\\d+)");
+
+        for (NodeState st : states) {
+            if (st.name == null || st.name.isEmpty()) continue;
+            if (find(st.name) != null) continue;                 // nombre repetido
+            if (alphabet.indexOf(st.value) < 0) continue;        // fuera del alfabeto
+            if (isValueUsed(st.value, null)) continue;           // simbolo repetido
+
+            nodes.add(new UINode(st.name, st.value, st.x, st.y));
+            syncInsert(st.value);
+
+            Matcher m = idPattern.matcher(st.name);
+            if (m.matches()) {
+                try { nextId = Math.max(nextId, Integer.parseInt(m.group(1)) + 1); }
+                catch (NumberFormatException ignored) { /* id enorme: se ignora */ }
+            }
+        }
+        nextId = Math.max(nextId, nodes.size());
+
+        for (String[] e : edges) {
+            if (e == null || e.length < 2) continue;
+            UINode a = find(e[0]);
+            UINode b = find(e[1]);
+            if (a == null || b == null || a == b || a.links.contains(b.name)) continue;
+            a.links.add(b.name);
+            b.links.add(a.name);
+            syncConnect(a.value, b.value);
+        }
+        return nodes.size();
     }
 
     // ------------------------------------------------------------------

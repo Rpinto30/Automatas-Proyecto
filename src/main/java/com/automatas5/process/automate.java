@@ -52,4 +52,12 @@ public class Automate{
     }
 
 
+
+    /** Inverso de GetHeightByChar: altura entera (-5..5, se recorta) -> simbolo. */
+    public static char GetCharByHeight(int height) {
+        final String symbols = "#@%*;:!-,. "; // indice = altura + 5
+        int h = Math.max(-5, Math.min(5, height));
+        return symbols.charAt(h + 5);
+    }
+
 }

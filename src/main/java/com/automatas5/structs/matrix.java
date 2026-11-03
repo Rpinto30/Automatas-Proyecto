@@ -187,6 +187,22 @@ public class Matrix {
         return (n != null && n.x == x) ? n.value : '\0';
     }
 
+    /** Removes the node at (x, y) if present (an empty cell means the default ':' / height 0). */
+    public void removeInCoord(int x, int y) {
+        validate(x, y);
+        Node n = rows.get(y).first;
+        while (n != null && n.x < x) n = n.right;
+        if (n == null || n.x != x) return;
+        unlinkFromRow(n);
+        unlinkFromColumn(n);
+    }
+
+    /** Empties the whole matrix (keeps the current size). */
+    public void clear() {
+        for (Header h = rows.first; h != null; h = h.next) h.first = null;
+        for (Header h = columns.first; h != null; h = h.next) h.first = null;
+    }
+
     /** Current size of the terrain (size x size). */
     public int getSize() {
         return size;

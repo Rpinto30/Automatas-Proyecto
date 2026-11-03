@@ -1,15 +1,30 @@
 package com.automatas5.process;
 
+import java.util.List;
+
 import com.automatas5.Views.Dimension.Viewport3D;
 import com.automatas5.structs.Graph;
 import com.automatas5.structs.Matrix;
-import java.util.List;
 
 public class Tools {
+
+    /** Estado en el que termina el recorrido: la altura 0 por defecto (celda null de la matriz). */
+    private static final char GROUND = ':';
+
+    /**
+     * true  -> el pincel solo SUBE y el borrador solo BAJA (nunca deshacen lo que ya hay).
+     *          Asi, al arrastrar, los circulos que se solapan forman una cresta suave en vez de ir
+     *          rebajando la cima anterior.
+     * false -> cada celda toma siempre el simbolo del recorrido, sobrescribiendo lo que tuviera.
+     */
+    private static final boolean BLEND = true;
 
     private final Graph grafo;
     private final Matrix matrix;
     private Viewport3D viewport;
+
+    /** Ultimo mensaje de error/aviso de ModificateTerrain ("" si todo salio bien). La UI lo muestra. */
+    private String lastMessage = "";
 
     // Constructor
     public Tools(Graph grafo, Matrix matrix) {
@@ -17,7 +32,7 @@ public class Tools {
         this.matrix = matrix;
     }
 
-    // Constructor sobrecargado opcional 
+    // Constructor sobrecargado opcional
     public Tools(Graph grafo, Matrix matrix, Viewport3D viewport) {
         this.grafo = grafo;
         this.matrix = matrix;
@@ -28,103 +43,99 @@ public class Tools {
         this.viewport = viewport;
     }
 
+    public String getLastMessage() {
+        return lastMessage;
+    }
+
+    /** Version sin herramienta: fuerza >= 0 se trata como pincel, fuerza < 0 como borrador. */
+    public boolean ModificateTerrain(int radius, double force) {
+        return ModificateTerrain(radius, force, force >= 0.0);
+    }
+
     /**
-     * Modifica el terreno aplicando el radio, la fuerza y el camino de Dijkstra.
+     * Pincel radial con el automata.
      *
-     * @param radius Radio del pincel (1 a 10)
-     * @param force  Fuerza del pincel: Borrador [-1.0, 0.0], Lápiz [0.0, 1.0]
+     * 1. Estado inicial = simbolo elegido por la fuerza (Automate.GetCharByForce). Siempre es el del centro.
+     * 2. Se calcula con Dijkstra el camino de ese simbolo hasta el estado base ':' (altura 0).
+     * 3. Cada celda a distancia euclidiana d del centro (redondeada al anillo 0, 1, 2...) recibe el estado
+     *    numero d del camino. El centro es el estado 0 (el inicial); cada anillo avanza un estado.
+     * 4. El recorrido termina donde se acaba el radio o el camino: el estado final depende de cuantos estados
+     *    alcanza a recorrer. Si el radio es menor que el camino queda un escalon; si es mayor, las celdas
+     *    mas alla del ultimo estado no se tocan.
+     *
+     * @param radius Radio del pincel (1 a 10), en celdas
+     * @param force  Fuerza: Borrador [-1.0, 0.0], Lapiz [0.0, 1.0]
+     * @param raise  true = pincel (sube), false = borrador (baja); solo importa con BLEND
+     * @return true si se modifico el terreno; si es false, getLastMessage() explica por que.
      */
-    public void ModificateTerrain(int radius, double force) {
+    public boolean ModificateTerrain(int radius, double force, boolean raise) {
+        lastMessage = "";
         if (viewport == null || grafo == null || matrix == null) {
-            return;
+            lastMessage = "El viewer 3D aun no esta listo.";
+            return false;
         }
 
-        // Obtener el símbolo de destino con el método real de Automate.java
-        char dest = Automate.GetCharByForce(force);
-        if (dest == '\0') {
-            return;
+        char inicio = Automate.GetCharByForce(force);
+        if (inicio == '\0') {
+            lastMessage = "Fuerza fuera de rango.";
+            return false;
         }
+        // el borrador nunca puede empezar por encima del suelo (fuerza 0 daria '!')
+        if (!raise && Automate.GetHeightByChar(inicio) > 0) inicio = GROUND;
 
-        // Obtener el camino de símbolos desde # hasta dest con el Dijkstra
-        List<Character> caminoDijkstra = grafo.GetDijsktra('#', dest);
-        if (caminoDijkstra == null || caminoDijkstra.isEmpty()) {
-            return;
-        }
-
-        // Obtener las coordenadas (xi, yi) del vértice seleccionado en el Viewport3D
         int[] selectedVertex = viewport.getSelectedVertex();
         if (selectedVertex == null || selectedVertex.length < 2) {
-            return;
+            lastMessage = "No hay un vertice seleccionado.";
+            return false;
         }
         int xi = selectedVertex[0];
         int yi = selectedVertex[1];
 
-        int ultimoIndice = caminoDijkstra.size() - 1;
-
-        // Recorrido de puntos según el radio y aplicación del suavizado
-
-        // A. CENTRO (xi, yi) : aplica el último carácter de la lista de Dijkstra
-        char charCentro = caminoDijkstra.get(ultimoIndice);
-        aplicarCambioVertice(xi, yi, charCentro);
-
-        // B. EJES CARDINALES (0, pi/2, pi, 3pi/2): recorre de 1 hasta r
-        int[][] direccionesEjes = {
-            { 1,  0}, // Derecha (0)
-            { 0,  1}, // Arriba (pi/2)
-            {-1,  0}, // Izquierda (pi)
-            { 0, -1}  // Abajo (3pi/2)
-        };
-
-        for (int d = 1; d <= radius; d++) {
-            char caracterActual = obtenerCaracterSuavizado(caminoDijkstra, d);
-            for (int[] dir : direccionesEjes) {
-                int nx = xi + (dir[0] * d);
-                int ny = yi + (dir[1] * d);
-                aplicarCambioVertice(nx, ny, caracterActual);
-            }
+        if (grafo.SearchNode(inicio) == null) {
+            lastMessage = "El automata no tiene el estado inicial '" + inicio + "'.";
+            return false;
+        }
+        if (grafo.SearchNode(GROUND) == null) {
+            lastMessage = "El automata no tiene el estado base '" + GROUND + "'.";
+            return false;
         }
 
-        // C. ÁNGULOS MEDIOS (pi/4, 3pi/4, 5pi/4, 7pi/4): recorre de 1 hasta r - 1
-        int[][] direccionesMedios = {
-            { 1,  1}, // pi/4
-            {-1,  1}, // 3pi/4
-            {-1, -1}, // 5pi/4
-            { 1, -1}  // 7pi/4
-        };
+        List<Character> camino = grafo.GetDijsktra(inicio, GROUND);
+        if (camino == null || camino.isEmpty()) {
+            lastMessage = "No hay ruta en el automata de '" + inicio + "' a '" + GROUND + "'.";
+            return false;
+        }
 
-        for (int d = 1; d <= radius - 1; d++) {
-            char caracterActual = obtenerCaracterSuavizado(caminoDijkstra, d);
-            for (int[] dir : direccionesMedios) {
-                int nx = xi + (dir[0] * d);
-                int ny = yi + (dir[1] * d);
-                aplicarCambioVertice(nx, ny, caracterActual);
+        // Recorrido radial: anillo = distancia euclidiana redondeada
+        for (int dy = -radius; dy <= radius; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                int anillo = (int) Math.round(Math.hypot(dx, dy));
+                if (anillo > radius) continue;          // fuera del circulo
+                if (anillo >= camino.size()) continue;  // el automata no llega tan lejos
+                aplicarCambioVertice(xi + dx, yi + dy, camino.get(anillo), raise);
             }
         }
+        return true;
     }
 
     /**
-     * Obtiene el carácter de la lista de Dijkstra retrocediendo según la distancia al centro.
+     * Fija el vertice a la altura ABSOLUTA del simbolo y guarda el simbolo en la matriz.
+     * ':' (altura 0) se guarda como celda vacia (null) para que la matriz siga siendo dispersa.
      */
-    private char obtenerCaracterSuavizado(List<Character> camino, int distancia) {
-        int ultimoIndice = camino.size() - 1;
-        int indice = Math.max(0, ultimoIndice - distancia);
-        return camino.get(indice);
-    }
-
-    /**
-     * Obtiene la altura con Automate.GetHeightByChar y actualiza el Viewport3D y la Matrix.
-     */
-    private void aplicarCambioVertice(int x, int y, char simbolo) {
-        // Obtener altura entera desde Automate.java
+    private void aplicarCambioVertice(int x, int y, char simbolo, boolean raise) {
         int altura = Automate.GetHeightByChar(simbolo);
 
-        // Modificar el vértice en el terreno 3D 
-        viewport.addVertexHeight(x, y, altura);
+        if (BLEND) {
+            int actual = viewport.getVertexHeight(x, y);
+            if (raise ? altura <= actual : altura >= actual) return; // no deshacer lo que ya hay
+        }
 
-        // Validar bordes de Matrix 
-        int size = matrix.getSize();
-        if (x >= 0 && x < size && y >= 0 && y < size) {
-            matrix.insertInCoord(x, y, simbolo);
+        // Fuera de la malla: setVertexHeight devuelve false y no tocamos la matriz
+        if (!viewport.setVertexHeight(x, y, altura)) return;
+
+        if (x >= 0 && x < matrix.getSize() && y >= 0 && y < matrix.getSize()) {
+            if (simbolo == ':') matrix.removeInCoord(x, y);
+            else matrix.insertInCoord(x, y, simbolo);
         }
     }
 }
