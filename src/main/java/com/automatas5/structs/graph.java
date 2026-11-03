@@ -12,8 +12,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.automatas5.process.Automate;
-
-public class graph {
+public class Graph{
 
     // Adjacency list and vertex list
     public Map<String, List<String>> vertexMap = new HashMap<>();
