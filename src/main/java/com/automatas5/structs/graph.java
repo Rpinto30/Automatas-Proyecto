@@ -47,6 +47,50 @@ public class graph {
         vertexMap.put(String.valueOf(value), new ArrayList<>());
     }
 
+    // Deletes a node and removes all its incoming and outgoing edges
+    public boolean DeleteNode(char value) {
+        if (SearchNode(value) == null) {
+            return false;
+        }
+
+        String key = String.valueOf(value);
+        vertexList.remove(Character.valueOf(value));
+        vertexMap.remove(key);
+
+        for (List<String> neighbors : vertexMap.values()) {
+            neighbors.remove(key);
+        }
+        return true;
+    }
+
+    // Updates a node's value while preserving its connections
+    public boolean ModifyNode(char oldValue, char newValue) {
+        if (SearchNode(oldValue) == null || !validate(newValue)) {
+            return false;
+        }
+
+        String oldKey = String.valueOf(oldValue);
+        String newKey = String.valueOf(newValue);
+
+        // Update vertex list
+        int index = vertexList.indexOf(oldValue);
+        vertexList.set(index, newValue);
+
+        // Update outgoing edges key in map
+        List<String> outgoingEdges = vertexMap.remove(oldKey);
+        vertexMap.put(newKey, outgoingEdges != null ? outgoingEdges : new ArrayList<>());
+
+        // Update incoming edges across all adjacency lists
+        for (List<String> neighbors : vertexMap.values()) {
+            for (int i = 0; i < neighbors.size(); i++) {
+                if (neighbors.get(i).equals(oldKey)) {
+                    neighbors.set(i, newKey);
+                }
+            }
+        }
+        return true;
+    }
+
     // Creates a directed edge between two existing nodes
     public void ConnectNodes(char origin, char dest) {
         if (SearchNode(origin) != null && SearchNode(dest) != null) {
@@ -114,7 +158,7 @@ public class graph {
 
         // Reconstruct shortest path from origin to dest
         List<Character> path = new ArrayList<>();
-        if (!origin.equals(dest) && !predecessors.containsKey(dest)) {
+        if (!origin.equals(dest) && !predecesorsContains(predecessors, dest)) {
             return path;
         }
 
@@ -124,6 +168,10 @@ public class graph {
         }
         Collections.reverse(path);
         return path;
+    }
+
+    private boolean predecesorsContains(Map<Character, Character> predecessors, Character dest) {
+        return predecessors.containsKey(dest);
     }
 
     // Overload for standard spelling and primitive char parameters
