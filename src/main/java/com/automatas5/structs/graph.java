@@ -1,7 +1,6 @@
 package com.automatas5.structs;
 
 import java.util.ArrayList;
-
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -13,8 +12,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import com.automatas5.process.Automate;
-
-public class Graph {
+public class Graph{
 
     // Adjacency list and vertex list
     public Map<String, List<String>> vertexMap = new HashMap<>();
