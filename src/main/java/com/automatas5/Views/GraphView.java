@@ -55,6 +55,7 @@ public class GraphView {
     private UINode dragging;
     private UINode connectOrigin;
     private int nextId = 0;
+    private float clickX = -1, clickY = -1; // ultimo clic dentro del canvas (diagnostico)
     private String lastEvent = "(sin eventos)"; // solo para el diagnostico
     private String rawClick = "-";               // solo para el diagnostico
 
@@ -170,6 +171,8 @@ public class GraphView {
             lastEvent = "clic (" + (int) mx + "," + (int) my + ") modo=" + mode
                     + " hit=" + (hit == null ? "-" : hit.name);
             if (DEBUG) System.out.println("[GraphView] " + lastEvent);
+            clickX = mx;
+            clickY = my;
             switch (mode) {
                 case CREATE -> {
                     if (hit == null) createNode(mx, my);
@@ -243,6 +246,11 @@ public class GraphView {
         }
         if (DEBUG) {
             int green = ImColor.rgba(120, 255, 120, 255);
+            if (clickX >= 0) { // cruz roja donde cayo el ultimo clic dentro del canvas
+                int red = ImColor.rgba(255, 60, 60, 255);
+                dl.addLine(ox + clickX - 7f, oy + clickY, ox + clickX + 7f, oy + clickY, red, 2f);
+                dl.addLine(ox + clickX, oy + clickY - 7f, ox + clickX, oy + clickY + 7f, red, 2f);
+            }
             dl.addText(ox + 6f, oy + h - 50f, green, "clicRaw=" + rawClick + " canvas=(" + (int) ox + ","
                     + (int) oy + ")-(" + (int) (ox + w) + "," + (int) (oy + h) + ")");
             dl.addText(ox + 6f, oy + h - 34f, green, "ultimo: " + lastEvent);
@@ -392,8 +400,8 @@ public class GraphView {
     private void changeValue(UINode n, char newValue) {
         if (isValueUsed(newValue, n)) return; // regla: sin valores repetidos
         char old = n.value;
+        if (!syncChangeValue(old, newValue)) return; // el grafo lo rechazo: la UI no cambia
         n.value = newValue;
-        syncChangeValue(old, newValue);
     }
 
     private boolean isValueUsed(char c, UINode except) {
@@ -450,6 +458,12 @@ public class GraphView {
         }
     }
 
+    /** Quita la arista from -> to directo del mapa de adyacencia (el Graph real no trae DisconnectNodes). */
+    private void removeEdge(char from, char to) {
+        List<String> out = graph.vertexMap.get(String.valueOf(from));
+        if (out != null) out.remove(String.valueOf(to));
+    }
+
     private void syncInsert(char value) {
         safeGraph(() -> graph.InsertNode(value));
     }
@@ -464,12 +478,22 @@ public class GraphView {
 
     private void syncDisconnect(char a, char b) {
         safeGraph(() -> {
-            graph.DisconnectNodes(a, b);
-            graph.DisconnectNodes(b, a);
+            removeEdge(a, b);
+            removeEdge(b, a);
         });
     }
 
-    private void syncChangeValue(char oldValue, char newValue) {
-        safeGraph(() -> graph.ChangeNodeValue(oldValue, newValue));
+    /** @return true si el grafo acepto el cambio (ModifyNode valida unicidad y alfabeto). */
+    private boolean syncChangeValue(char oldValue, char newValue) {
+        if (graph == null) return true;
+        try {
+            if (graph.ModifyNode(oldValue, newValue)) return true;
+            statusMsg = "El grafo rechazo el cambio de '" + oldValue + "' a '" + newValue + "'.";
+            return false;
+        } catch (RuntimeException ex) {
+            statusMsg = "Graph: " + ex;
+            ex.printStackTrace();
+            return false;
+        }
     }
 }
