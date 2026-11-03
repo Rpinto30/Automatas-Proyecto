@@ -1,6 +1,6 @@
 package com.automatas5.Views;
 
-import com.automatas5.structs.Graph;
+import com.automatas5.structs.Graph; // TODO - debe importarse el nombre con el que la clase Graph chambee
 import imgui.ImGui;
 import imgui.app.Application;
 import imgui.app.Configuration;
@@ -22,6 +22,12 @@ public class MainView extends Application {
 
     public enum Tool { MOUSE, BRUSH, ERASER }
 
+    /** Gancho de pintado: radio, fuerza efectiva (ya limitada por herramienta) y herramienta activa. */
+    @FunctionalInterface
+    public interface PaintListener {
+        void onPaint(int radius, double force, Tool tool);
+    }
+
     public static final int WIDTH = 1280;
     public static final int HEIGHT = 720;
 
@@ -40,14 +46,14 @@ public class MainView extends Application {
     // ---- ganchos (se conectan desde Main / Tools / Viewer) ----
     /** Se llama al confirmar una nueva resolucion (Enter). */
     private Consumer<Integer> onResolutionChange = r -> { };
-    /** Se llama mientras se pinta/borra: (radio, fuerza efectiva). Conecta con Tools.ModificateTerrain. */
-    private BiConsumer<Integer, Double> onPaint = (r, f) -> { };
+    /** Se llama mientras se pinta/borra: (radio, fuerza efectiva, herramienta). Conecta con Tools.ModificateTerrain. */
+    private PaintListener onPaint = (r, f, t) -> { };
     /** Dibuja el viewer 3D dentro del espacio central: (ancho, alto). */
     private BiConsumer<Float, Float> viewerRenderer;
     /** Contenido extra del dashboard (p. ej. caracteres de la matriz dispersa). */
     private Runnable dashboardExtra = () -> { };
 
-    public MainView(Graph graph) {
+    public MainView(Graph graph) { // TODO
         this.graphView = new GraphView(graph);
     }
 
@@ -56,7 +62,7 @@ public class MainView extends Application {
     // ------------------------------------------------------------------
 
     public void setOnResolutionChange(Consumer<Integer> c) { this.onResolutionChange = c; }
-    public void setOnPaint(BiConsumer<Integer, Double> c) { this.onPaint = c; }
+    public void setOnPaint(PaintListener l) { this.onPaint = l; }
     public void setViewerRenderer(BiConsumer<Float, Float> r) { this.viewerRenderer = r; }
     public void setDashboardExtra(Runnable r) { this.dashboardExtra = r; }
 
@@ -172,7 +178,7 @@ public class MainView extends Application {
 
         // pintar / borrar mientras se mantiene el clic sobre el viewer
         if (tool != Tool.MOUSE && ImGui.isItemHovered() && ImGui.isMouseDown(0)) {
-            onPaint.accept(radius[0], getEffectiveForce());
+            onPaint.onPaint(radius[0], getEffectiveForce(), tool);
         }
 
         // ---- panel de herramientas (stack horizontal) ----

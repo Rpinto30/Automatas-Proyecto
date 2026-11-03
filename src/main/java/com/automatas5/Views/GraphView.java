@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Editor visual del AFD (grafo de Diego).
+ * Editor visual del AFD
  * Opciones: Crear nodo, Conectar y Propiedades.
  *
  * Los nodos de la UI se llaman q0, q1, ... y cada uno tiene un valor (simbolo)
@@ -59,9 +59,9 @@ public class GraphView {
     private boolean openConnectDialog = false;
     private String statusMsg = "";
 
-    // public GraphView(Graph graph) { TODO - debe recibir un Graph para poder crear el GraphView
-    //     this.graph = graph;
-    // }
+    public GraphView(Graph graph) { //TODO - debe recibir un Graph para poder crear el GraphView
+         this.graph = graph;
+     }
 
     // ------------------------------------------------------------------
     // API para el dashboard / MainView
@@ -403,24 +403,24 @@ public class GraphView {
     // ------------------------------------------------------------------
 
     private void syncInsert(char value) {
-        // graph.InsertNode(value); TODO - Agregar un metodo InsertNode(char) en Graph para que el grafo interno se mantenga sincronizado con la UI   
+         graph.InsertNode(value); // TODO - Agregar un metodo InsertNode(char) en Graph para que el grafo interno se mantenga sincronizado con la UI   
     }
 
     private void syncConnect(char a, char b) {
         // el grafo de ejemplo es simetrico (# -> @,- ; @ -> #,- ...), se conecta en ambos sentidos
-        // graph.ConnectNodes(a, b);
-        // graph.ConnectNodes(b, a);
+         graph.ConnectNodes(a, b);
+         graph.ConnectNodes(b, a);
     }
 
     private void syncDisconnect(char a, char b) {
         // TODO: pedirle un DisconnectNodes(char, char); hoy el grafo solo agrega
-        // graph.DisconnectNodes(a, b);
-        // graph.DisconnectNodes(b, a);
+         graph.DisconnectNodes(a, b);
+         graph.DisconnectNodes(b, a);
     }
 
     private void syncChangeValue(char oldValue, char newValue) {
-        // TODO: pedirun ChangeNodeValue(char old, char neu) (o reconstruir el grafo);
+        // TODO: pedir un ChangeNodeValue(char old, char neu) (o reconstruir el grafo);
         // sin esto el grafo interno conserva el simbolo anterior.
-        // graph.ChangeNodeValue(oldValue, newValue);
+         graph.ChangeNodeValue(oldValue, newValue);
     }
 }
