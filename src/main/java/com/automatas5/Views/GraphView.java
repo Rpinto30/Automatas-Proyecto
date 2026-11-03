@@ -56,6 +56,7 @@ public class GraphView {
     private UINode connectOrigin;
     private int nextId = 0;
     private String lastEvent = "(sin eventos)"; // solo para el diagnostico
+    private String rawClick = "-";               // solo para el diagnostico
 
     private final ImString connectTarget = new ImString(16);
     private String connectError = "";
@@ -152,9 +153,14 @@ public class GraphView {
         float ox = origin.x, oy = origin.y;
 
         ImGui.invisibleButton("##graph_canvas", w, h);
-        // hover robusto: item hovered, o ventana hovered con el mouse dentro del rectangulo del canvas
-        boolean hovered = ImGui.isItemHovered()
-                || (ImGui.isWindowHovered() && ImGui.isMouseHoveringRect(ox, oy, ox + w, oy + h));
+        // hover independiente de la logica de ventanas de ImGui:
+        // el mouse esta dentro del rectangulo del canvas y no hay un dialogo modal abierto
+        float mouseX = ImGui.getMousePosX(), mouseY = ImGui.getMousePosY();
+        boolean inRect = mouseX >= ox && mouseX < ox + w && mouseY >= oy && mouseY < oy + h;
+        boolean hovered = (ImGui.isItemHovered() || inRect) && !ImGui.isPopupOpen(DIALOG_ID);
+        if (ImGui.isMouseClicked(0)) {
+            rawClick = "(" + (int) mouseX + "," + (int) mouseY + ") enRect=" + inRect;
+        }
 
         float mx = ImGui.getMousePosX() - ox;
         float my = ImGui.getMousePosY() - oy;
@@ -237,6 +243,8 @@ public class GraphView {
         }
         if (DEBUG) {
             int green = ImColor.rgba(120, 255, 120, 255);
+            dl.addText(ox + 6f, oy + h - 50f, green, "clicRaw=" + rawClick + " canvas=(" + (int) ox + ","
+                    + (int) oy + ")-(" + (int) (ox + w) + "," + (int) (oy + h) + ")");
             dl.addText(ox + 6f, oy + h - 34f, green, "ultimo: " + lastEvent);
             dl.addText(ox + 6f, oy + h - 18f, green,
                     "modo=" + mode + " hover=" + hovered + " mouse=(" + (int) mx + "," + (int) my + ")"

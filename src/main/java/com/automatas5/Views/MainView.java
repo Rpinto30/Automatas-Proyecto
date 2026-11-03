@@ -91,8 +91,17 @@ public class MainView extends Application {
 
     /** Abre la ventana y arranca el loop de ImGui (bloquea hasta que se cierra la ventana). */
     public void launch() {
+        if (launched) {
+            System.out.println("[MainView] launch() ya se habia ejecutado; se ignora la segunda llamada");
+            return;
+        }
+        launched = true;
+        System.out.println("[MainView] launch()");
         Application.launch(this);
+        System.out.println("[MainView] launch() termino (ventana cerrada)");
     }
+
+    private boolean launched = false;
 
     @Override
     protected void configure(Configuration config) {
@@ -107,6 +116,7 @@ public class MainView extends Application {
 
     @Override
     protected void postRun() {
+        System.out.println("[MainView] postRun: cerrando");
         // liberar los recursos de OpenGL del viewer al cerrar la ventana
         if (viewport != null) viewport.dispose();
     }
