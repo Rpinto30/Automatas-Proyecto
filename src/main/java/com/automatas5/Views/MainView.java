@@ -1,6 +1,7 @@
 package com.automatas5.Views;
 
-import com.automatas5.structs.Graph; // TODO - debe importarse el nombre con el que la clase Graph chambee
+import com.automatas5.Views.Dimension.Viewport3D;
+import com.automatas5.structs.Graph;
 import imgui.ImGui;
 import imgui.app.Application;
 import imgui.app.Configuration;
@@ -42,6 +43,8 @@ public class MainView extends Application {
 
     // ---- piezas conectadas ----
     private final GraphView graphView;
+    /** Viewer 3D: se crea en el primer frame porque necesita el handle de la ventana GLFW. */
+    private Viewport3D viewport;
 
     // ---- ganchos (se conectan desde Main / Tools / Viewer) ----
     /** Se llama al confirmar una nueva resolucion (Enter). */
@@ -53,7 +56,7 @@ public class MainView extends Application {
     /** Contenido extra del dashboard (p. ej. caracteres de la matriz dispersa). */
     private Runnable dashboardExtra = () -> { };
 
-    public MainView(Graph graph) { // TODO
+    public MainView(Graph graph) {
         this.graphView = new GraphView(graph);
     }
 
@@ -65,6 +68,9 @@ public class MainView extends Application {
     public void setOnPaint(PaintListener l) { this.onPaint = l; }
     public void setViewerRenderer(BiConsumer<Float, Float> r) { this.viewerRenderer = r; }
     public void setDashboardExtra(Runnable r) { this.dashboardExtra = r; }
+
+    /** Viewer 3D (null hasta que se dibuja el primer frame). Util para Tools: getSelectedVertex(), addVertexHeight()... */
+    public Viewport3D getViewport() { return viewport; }
 
     public int getResolution() { return resolution.get(); }
     public int getRadius() { return radius[0]; }
@@ -97,6 +103,12 @@ public class MainView extends Application {
     protected void preRun() {
         // ventana de 1280x720 (el tamano por defecto de Application es distinto)
         GLFW.glfwSetWindowSize(getHandle(), WIDTH, HEIGHT);
+    }
+
+    @Override
+    protected void postRun() {
+        // liberar los recursos de OpenGL del viewer al cerrar la ventana
+        if (viewport != null) viewport.dispose();
     }
 
     /** Se ejecuta una vez por frame. */
@@ -146,6 +158,7 @@ public class MainView extends Application {
         ImGui.setNextItemWidth(-1);
         if (ImGui.inputInt("##res", resolution, 0, 0, ImGuiInputTextFlags.EnterReturnsTrue)) {
             resolution.set(Math.max(MIN_RES, Math.min(MAX_RES, resolution.get())));
+            if (viewport != null) viewport.setSubdivisions(resolution.get());
             onResolutionChange.accept(resolution.get());
         }
         ImGui.nextColumn();
@@ -157,7 +170,12 @@ public class MainView extends Application {
 
         ImGui.text("Fuerza");
         ImGui.setNextItemWidth(-1);
-        ImGui.sliderFloat("##fuerza", force, -1f, 1f, "%.2f");
+        // el rango depende de la herramienta: lapiz 0..1, borrador -1..0, mouse -1..1
+        float lo = (tool == Tool.BRUSH) ? 0f : -1f;
+        float hi = (tool == Tool.ERASER) ? 0f : 1f;
+        ImGui.sliderFloat("##fuerza", force, lo, hi, "%.2f");
+        // Ctrl+clic permite teclear un valor; se recorta al rango valido
+        force[0] = Math.max(lo, Math.min(hi, force[0]));
         ImGui.nextColumn();
 
         ImGui.columns(1);
@@ -167,17 +185,22 @@ public class MainView extends Application {
         float viewH = ImGui.getContentRegionAvailY() - toolbarH;
         float viewW = ImGui.getContentRegionAvailX();
 
+        // Viewport3D se dibuja llenando el espacio del child (sin scroll)
+        ImGui.beginChild("##viewer", viewW, viewH, false,
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
         if (viewerRenderer != null) {
-            viewerRenderer.accept(viewW, viewH);
+            viewerRenderer.accept(viewW, viewH); // reemplazo opcional del viewer
         } else {
-            ImGui.invisibleButton("##viewer_placeholder", viewW, viewH);
-            ImGui.getWindowDrawList().addText(
-                    ImGui.getItemRectMinX() + 10f, ImGui.getItemRectMinY() + 10f,
-                    0xFF9A9A9A, "Viewer 3D (conectar con setViewerRenderer)");
+            if (viewport == null) {
+                viewport = new Viewport3D(getHandle(), resolution.get(), 10f);
+            }
+            viewport.render();
         }
+        boolean viewerHovered = ImGui.isWindowHovered();
+        ImGui.endChild();
 
         // pintar / borrar mientras se mantiene el clic sobre el viewer
-        if (tool != Tool.MOUSE && ImGui.isItemHovered() && ImGui.isMouseDown(0)) {
+        if (tool != Tool.MOUSE && viewerHovered && ImGui.isMouseDown(0)) {
             onPaint.onPaint(radius[0], getEffectiveForce(), tool);
         }
 

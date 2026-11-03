@@ -14,23 +14,7 @@ public class Main {
             // luego: matrix = new Matrix(res); viewer.setResolution(res);
         });
 
-        // 2) Pintar/borrar: se llama en cada frame mientras se mantiene el clic
-        view.setOnPaint((radio, fuerza, herramienta) -> {
-            System.out.println("Pintando r=" + radio + " f=" + fuerza + " h=" + herramienta);
-            // luego: tools.ModificateTerrain(radio, fuerza);
-        });
-
-        // 3) Viewer 3D: recibe el ancho y alto disponibles
-        view.setViewerRenderer((w, h) -> {
-            // luego: viewer.render(w, h);
-            imgui.ImGui.button("Aqui va el viewer " + w.intValue() + "x" + h.intValue(), w, h);
-        });
-
-        // 4) Contenido extra del dashboard (matriz dispersa)
-        view.setDashboardExtra(() -> {
-            imgui.ImGui.text("Matriz dispersa: (pendiente)");
-            // luego: recorrer la matriz y mostrar los caracteres
-        });
+       
 
         view.launch(); // siempre al final: bloquea hasta cerrar la ventana
         view.launch();

@@ -1,6 +1,6 @@
 package com.automatas5.Views;
 
-import com.automatas5.structs.Graph; // TODO - debe importarse el nombre con el que la clase Graph chambee
+import com.automatas5.structs.Graph;
 import imgui.ImColor;
 import imgui.ImDrawList;
 import imgui.ImGui;
@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Editor visual del AFD
+ * Editor visual del AFD (grafo de Diego).
  * Opciones: Crear nodo, Conectar y Propiedades.
  *
  * Los nodos de la UI se llaman q0, q1, ... y cada uno tiene un valor (simbolo)
@@ -27,8 +27,11 @@ public class GraphView {
     private static final float NODE_R = 18f;
     private static final float PROPS_HEIGHT = 150f;
     private static final String DIALOG_ID = "Conectar estado";
+    /** Linea verde de diagnostico en el canvas (modo, hover, mouse, nodos). Poner en false al terminar. */
+    private static final boolean DEBUG = true;
 
-    private enum Mode { SELECT, CREATE, CONNECT }
+    /** SELECT = ninguna opcion activa (solo seleccionar y arrastrar). Las otras tres son excluyentes. */
+    private enum Mode { SELECT, CREATE, CONNECT, PROPS }
 
     private static class UINode {
         final String name;
@@ -44,24 +47,24 @@ public class GraphView {
         }
     }
 
-    private final Graph graph; // TODO - debe recibir un Graph para poder crear el GraphView
+    private final Graph graph;
     private final List<UINode> nodes = new ArrayList<>();
 
     private Mode mode = Mode.SELECT;
-    private boolean showProps = true;
     private UINode selected;
     private UINode dragging;
     private UINode connectOrigin;
     private int nextId = 0;
+    private String lastEvent = "(sin eventos)"; // solo para el diagnostico
 
     private final ImString connectTarget = new ImString(16);
     private String connectError = "";
     private boolean openConnectDialog = false;
     private String statusMsg = "";
 
-    public GraphView(Graph graph) { //TODO - debe recibir un Graph para poder crear el GraphView
-         this.graph = graph;
-     }
+    public GraphView(Graph graph) {
+        this.graph = graph;
+    }
 
     // ------------------------------------------------------------------
     // API para el dashboard / MainView
@@ -94,6 +97,7 @@ public class GraphView {
     // ------------------------------------------------------------------
 
     public void render(float width, float height) {
+        boolean showProps = (mode == Mode.PROPS);
         renderToolbar();
 
         float canvasH = height - ImGui.getFrameHeightWithSpacing() - 6f;
@@ -114,22 +118,26 @@ public class GraphView {
 
     private void renderToolbar() {
         if (modeButton("Crear nodo", mode == Mode.CREATE)) {
-            mode = (mode == Mode.CREATE) ? Mode.SELECT : Mode.CREATE;
-            statusMsg = "";
+            toggleMode(Mode.CREATE);
         }
         ImGui.sameLine();
         if (modeButton("Conectar", mode == Mode.CONNECT)) {
-            mode = (mode == Mode.CONNECT) ? Mode.SELECT : Mode.CONNECT;
-            statusMsg = "";
+            toggleMode(Mode.CONNECT);
             // si ya hay un nodo seleccionado, abrir el dialogo directo
             if (mode == Mode.CONNECT && selected != null) {
                 startConnect(selected);
             }
         }
         ImGui.sameLine();
-        if (modeButton("Propiedades", showProps)) {
-            showProps = !showProps;
+        if (modeButton("Propiedades", mode == Mode.PROPS)) {
+            toggleMode(Mode.PROPS);
         }
+    }
+
+    /** Solo una opcion activa a la vez: elegir otra desactiva la anterior; volver a pulsar la activa la apaga. */
+    private void toggleMode(Mode m) {
+        mode = (mode == m) ? Mode.SELECT : m;
+        statusMsg = "";
     }
 
     private boolean modeButton(String text, boolean active) {
@@ -144,13 +152,18 @@ public class GraphView {
         float ox = origin.x, oy = origin.y;
 
         ImGui.invisibleButton("##graph_canvas", w, h);
-        boolean hovered = ImGui.isItemHovered();
+        // hover robusto: item hovered, o ventana hovered con el mouse dentro del rectangulo del canvas
+        boolean hovered = ImGui.isItemHovered()
+                || (ImGui.isWindowHovered() && ImGui.isMouseHoveringRect(ox, oy, ox + w, oy + h));
 
         float mx = ImGui.getMousePosX() - ox;
         float my = ImGui.getMousePosY() - oy;
 
         if (hovered && ImGui.isMouseClicked(0)) {
             UINode hit = nodeAt(mx, my);
+            lastEvent = "clic (" + (int) mx + "," + (int) my + ") modo=" + mode
+                    + " hit=" + (hit == null ? "-" : hit.name);
+            if (DEBUG) System.out.println("[GraphView] " + lastEvent);
             switch (mode) {
                 case CREATE -> {
                     if (hit == null) createNode(mx, my);
@@ -162,7 +175,7 @@ public class GraphView {
                         startConnect(hit);
                     }
                 }
-                case SELECT -> {
+                case SELECT, PROPS -> {
                     selected = hit;
                     dragging = hit;
                 }
@@ -185,12 +198,14 @@ public class GraphView {
         dl.addRect(ox, oy, ox + w, oy + h, ImColor.rgba(120, 120, 130, 255));
 
         int edgeCol = ImColor.rgba(190, 190, 200, 255);
+        int edgeHi = ImColor.rgba(255, 200, 60, 255);
         for (UINode a : nodes) {
             for (String linkName : a.links) {
                 UINode b = find(linkName);
                 // dibujar cada arista una sola vez
                 if (b != null && a.name.compareTo(b.name) < 0) {
-                    dl.addLine(ox + a.x, oy + a.y, ox + b.x, oy + b.y, edgeCol, 2f);
+                    boolean hi = (a == selected || b == selected); // aristas del nodo seleccionado
+                    dl.addLine(ox + a.x, oy + a.y, ox + b.x, oy + b.y, hi ? edgeHi : edgeCol, hi ? 3f : 2f);
                 }
             }
         }
@@ -199,9 +214,14 @@ public class GraphView {
         for (UINode n : nodes) {
             float cx = ox + n.x, cy = oy + n.y;
             boolean sel = (n == selected);
-            dl.addCircleFilled(cx, cy, NODE_R, ImColor.rgba(40, 60, 120, 255));
-            dl.addCircle(cx, cy, NODE_R, sel ? ImColor.rgba(255, 220, 80, 255) : ImColor.rgba(220, 220, 230, 255),
-                    0, sel ? 3f : 2f);
+            // vecino = nodo conectado al seleccionado
+            boolean near = !sel && selected != null && selected.links.contains(n.name);
+            dl.addCircleFilled(cx, cy, NODE_R,
+                    near ? ImColor.rgba(40, 110, 130, 255) : ImColor.rgba(40, 60, 120, 255));
+            int ring = sel ? ImColor.rgba(255, 220, 80, 255)
+                    : near ? ImColor.rgba(90, 220, 220, 255)
+                    : ImColor.rgba(220, 220, 230, 255);
+            dl.addCircle(cx, cy, NODE_R, ring, 0, (sel || near) ? 3f : 2f);
 
             String v = String.valueOf(n.value == ' ' ? '_' : n.value);
             ImGui.calcTextSize(ts, v);
@@ -214,6 +234,13 @@ public class GraphView {
         if (nodes.isEmpty()) {
             dl.addText(ox + 10f, oy + 10f, ImColor.rgba(150, 150, 160, 255),
                     "Usa \"Crear nodo\" y haz clic en el canvas");
+        }
+        if (DEBUG) {
+            int green = ImColor.rgba(120, 255, 120, 255);
+            dl.addText(ox + 6f, oy + h - 34f, green, "ultimo: " + lastEvent);
+            dl.addText(ox + 6f, oy + h - 18f, green,
+                    "modo=" + mode + " hover=" + hovered + " mouse=(" + (int) mx + "," + (int) my + ")"
+                            + " nodos=" + nodes.size() + " sel=" + (selected == null ? "-" : selected.name));
         }
         dl.popClipRect();
     }
@@ -299,6 +326,8 @@ public class GraphView {
         }
         UINode n = new UINode("q" + nextId++, free, x, y);
         nodes.add(n);
+        lastEvent = "creado " + n.name + " valor=" + n.value + " en (" + (int) x + "," + (int) y + ")";
+        if (DEBUG) System.out.println("[GraphView] " + lastEvent);
         selected = n;
         statusMsg = "";
         syncInsert(n.value);
@@ -402,25 +431,37 @@ public class GraphView {
     // Puente con el Graph de Diego: si cambia su API, solo se toca aqui
     // ------------------------------------------------------------------
 
+    /** Ejecuta una llamada al Graph sin que un fallo (null, placeholder, excepcion) rompa la UI. */
+    private void safeGraph(Runnable call) {
+        if (graph == null) return;
+        try {
+            call.run();
+        } catch (RuntimeException ex) {
+            statusMsg = "Graph: " + ex;
+            ex.printStackTrace();
+        }
+    }
+
     private void syncInsert(char value) {
-         graph.InsertNode(value); // TODO - Agregar un metodo InsertNode(char) en Graph para que el grafo interno se mantenga sincronizado con la UI   
+        safeGraph(() -> graph.InsertNode(value));
     }
 
     private void syncConnect(char a, char b) {
         // el grafo de ejemplo es simetrico (# -> @,- ; @ -> #,- ...), se conecta en ambos sentidos
-         graph.ConnectNodes(a, b);
-         graph.ConnectNodes(b, a);
+        safeGraph(() -> {
+            graph.ConnectNodes(a, b);
+            graph.ConnectNodes(b, a);
+        });
     }
 
     private void syncDisconnect(char a, char b) {
-        // TODO: pedirle un DisconnectNodes(char, char); hoy el grafo solo agrega
-         graph.DisconnectNodes(a, b);
-         graph.DisconnectNodes(b, a);
+        safeGraph(() -> {
+            graph.DisconnectNodes(a, b);
+            graph.DisconnectNodes(b, a);
+        });
     }
 
     private void syncChangeValue(char oldValue, char newValue) {
-        // TODO: pedir un ChangeNodeValue(char old, char neu) (o reconstruir el grafo);
-        // sin esto el grafo interno conserva el simbolo anterior.
-         graph.ChangeNodeValue(oldValue, newValue);
+        safeGraph(() -> graph.ChangeNodeValue(oldValue, newValue));
     }
 }
