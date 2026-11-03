@@ -1,6 +1,6 @@
 package com.automatas5.process;
 
-import com.automatas5.Views.Viewport3D;
+import com.automatas5.Views.Dimension.Viewport3D;
 import com.automatas5.structs.Graph;
 import com.automatas5.structs.Matrix;
 import java.util.List;
