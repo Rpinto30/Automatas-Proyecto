@@ -17,6 +17,5 @@ public class Main {
        
 
         view.launch(); // siempre al final: bloquea hasta cerrar la ventana
-        view.launch();
     }
 }
