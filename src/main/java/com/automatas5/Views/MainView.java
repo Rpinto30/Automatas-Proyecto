@@ -1,74 +1,233 @@
 package com.automatas5.Views;
 
-import com.automatas5.Views.Dimension.Viewport3D;
-import com.automatas5.structs.Matrix;
-
+import com.automatas5.structs.Graph;
 import imgui.ImGui;
 import imgui.app.Application;
 import imgui.app.Configuration;
+import imgui.flag.ImGuiCol;
+import imgui.flag.ImGuiInputTextFlags;
+import imgui.flag.ImGuiWindowFlags;
+import imgui.type.ImInt;
+import org.lwjgl.glfw.GLFW;
 
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+
+/**
+ * Ventana principal 1280x720.
+ * Izquierda (60%): editor 3D con resolucion, radio, fuerza y herramientas.
+ * Derecha (40%): editor del AFD (GraphView) y resumen del automata.
+ */
 public class MainView extends Application {
-    
-    private Viewport3D viewport;
-    private final imgui.type.ImInt heightInput = new imgui.type.ImInt(4);
-    
-    //Structs
-    private int cells;
-    private Matrix matrix; 
+
+    public enum Tool { MOUSE, BRUSH, ERASER }
+
+    public static final int WIDTH = 1280;
+    public static final int HEIGHT = 720;
+
+    private static final int MIN_RES = 2;
+    private static final int MAX_RES = 100;
+
+    // ---- estado de los widgets ----
+    private final ImInt resolution = new ImInt(25);
+    private final int[] radius = {5};          // 1..10, solo enteros
+    private final float[] force = {0.5f};      // -1..1
+    private Tool tool = Tool.MOUSE;
+
+    // ---- piezas conectadas ----
+    private final GraphView graphView;
+
+    // ---- ganchos (se conectan desde Main / Tools / Viewer) ----
+    /** Se llama al confirmar una nueva resolucion (Enter). */
+    private Consumer<Integer> onResolutionChange = r -> { };
+    /** Se llama mientras se pinta/borra: (radio, fuerza efectiva). Conecta con Tools.ModificateTerrain. */
+    private BiConsumer<Integer, Double> onPaint = (r, f) -> { };
+    /** Dibuja el viewer 3D dentro del espacio central: (ancho, alto). */
+    private BiConsumer<Float, Float> viewerRenderer;
+    /** Contenido extra del dashboard (p. ej. caracteres de la matriz dispersa). */
+    private Runnable dashboardExtra = () -> { };
+
+    public MainView(Graph graph) {
+        this.graphView = new GraphView(graph);
+    }
+
+    // ------------------------------------------------------------------
+    // Conexiones
+    // ------------------------------------------------------------------
+
+    public void setOnResolutionChange(Consumer<Integer> c) { this.onResolutionChange = c; }
+    public void setOnPaint(BiConsumer<Integer, Double> c) { this.onPaint = c; }
+    public void setViewerRenderer(BiConsumer<Float, Float> r) { this.viewerRenderer = r; }
+    public void setDashboardExtra(Runnable r) { this.dashboardExtra = r; }
+
+    public int getResolution() { return resolution.get(); }
+    public int getRadius() { return radius[0]; }
+    public Tool getTool() { return tool; }
+
+    /** Lapiz: fuerza en [0, 1]; Borrador: fuerza en [-1, 0]; Mouse: 0. */
+    public double getEffectiveForce() {
+        return switch (tool) {
+            case BRUSH -> Math.max(0f, force[0]);
+            case ERASER -> Math.min(0f, force[0]);
+            case MOUSE -> 0.0;
+        };
+    }
+
+    // ------------------------------------------------------------------
+    // Ciclo de vida de la aplicacion
+    // ------------------------------------------------------------------
+
+    /** Abre la ventana y arranca el loop de ImGui (bloquea hasta que se cierra la ventana). */
+    public void launch() {
+        Application.launch(this);
+    }
 
     @Override
     protected void configure(Configuration config) {
-        config.setTitle("Mi Ventana con ImGui en Java");
-        config.setWidth(1280);
-        config.setHeight(720);
+        config.setTitle("Automatas - Editor de gradientes");
     }
 
-   
     @Override
-    protected void init(Configuration config) {
-        super.init(config); 
-
-        long windowHandle = getHandle(); 
-
-        this.cells = 16;
-        matrix = new Matrix(this.cells);
-
-        viewport = new Viewport3D(windowHandle, this.cells, 20f);
-        viewport.init(); 
+    protected void preRun() {
+        // ventana de 1280x720 (el tamano por defecto de Application es distinto)
+        GLFW.glfwSetWindowSize(getHandle(), WIDTH, HEIGHT);
     }
 
-    //render loop
+    /** Se ejecuta una vez por frame. */
     @Override
     public void process() {
-        ImGui.begin("Herramientas");
-
-        int[] v = viewport.getSelectedVertex();
-        if (v != null) {
-            ImGui.text("Vértice: columna " + v[0] + ", fila " + v[1]);
-            ImGui.text("Altura actual: " + viewport.getVertexHeight(v[0], v[1]));
-        } else {
-            ImGui.text("Ningún vértice seleccionado (clic izquierdo en el terreno)");
-        }
-
-        ImGui.inputInt("Altura", heightInput);
-
-        if (v != null) {
-            if (ImGui.button("Fijar altura")) {
-                viewport.setVertexHeight(v[0], v[1], heightInput.get());
-            }
-            ImGui.sameLine();
-            if (ImGui.button("Subir")) {
-                viewport.addVertexHeight(v[0], v[1], heightInput.get());
-            }
-        }
-        ImGui.end();
-
-        viewport.showWindow("Terreno");
+        render();
     }
 
-    @Override
-    protected void dispose() {
-        if (viewport != null) viewport.dispose();
-        super.dispose();
+    // ------------------------------------------------------------------
+    // Render (llamar una vez por frame)
+    // ------------------------------------------------------------------
+
+    public void render() {
+        ImGui.setNextWindowPos(0, 0);
+        ImGui.setNextWindowSize(WIDTH, HEIGHT);
+        int flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize
+                | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse;
+
+        if (ImGui.begin("Automatas", flags)) {
+            float totalW = ImGui.getContentRegionAvailX();
+            float totalH = ImGui.getContentRegionAvailY();
+            float leftW = totalW * 0.60f - 4f;
+            float rightW = totalW * 0.40f - 4f;
+
+            ImGui.beginChild("##left", leftW, totalH, true);
+            renderLeft(leftW, totalH);
+            ImGui.endChild();
+
+            ImGui.sameLine();
+
+            ImGui.beginChild("##right", rightW, totalH, true);
+            renderRight(rightW, totalH);
+            ImGui.endChild();
+        }
+        ImGui.end();
+    }
+
+    // ------------------------------------------------------------------
+    // Panel izquierdo
+    // ------------------------------------------------------------------
+
+    private void renderLeft(float w, float h) {
+        // ---- fila de parametros: Resolucion | Radio | Fuerza ----
+        ImGui.columns(3, "##params", false);
+
+        ImGui.text("Resolucion");
+        ImGui.setNextItemWidth(-1);
+        if (ImGui.inputInt("##res", resolution, 0, 0, ImGuiInputTextFlags.EnterReturnsTrue)) {
+            resolution.set(Math.max(MIN_RES, Math.min(MAX_RES, resolution.get())));
+            onResolutionChange.accept(resolution.get());
+        }
+        ImGui.nextColumn();
+
+        ImGui.text("Radio");
+        ImGui.setNextItemWidth(-1);
+        ImGui.sliderInt("##radio", radius, 1, 10);
+        ImGui.nextColumn();
+
+        ImGui.text("Fuerza");
+        ImGui.setNextItemWidth(-1);
+        ImGui.sliderFloat("##fuerza", force, -1f, 1f, "%.2f");
+        ImGui.nextColumn();
+
+        ImGui.columns(1);
+
+        // ---- espacio del editor 3D ----
+        float toolbarH = 48f;
+        float viewH = ImGui.getContentRegionAvailY() - toolbarH;
+        float viewW = ImGui.getContentRegionAvailX();
+
+        if (viewerRenderer != null) {
+            viewerRenderer.accept(viewW, viewH);
+        } else {
+            ImGui.invisibleButton("##viewer_placeholder", viewW, viewH);
+            ImGui.getWindowDrawList().addText(
+                    ImGui.getItemRectMinX() + 10f, ImGui.getItemRectMinY() + 10f,
+                    0xFF9A9A9A, "Viewer 3D (conectar con setViewerRenderer)");
+        }
+
+        // pintar / borrar mientras se mantiene el clic sobre el viewer
+        if (tool != Tool.MOUSE && ImGui.isItemHovered() && ImGui.isMouseDown(0)) {
+            onPaint.accept(radius[0], getEffectiveForce());
+        }
+
+        // ---- panel de herramientas (stack horizontal) ----
+        renderToolbar(viewW);
+    }
+
+    private void renderToolbar(float panelW) {
+        float btnW = 100f;
+        float startX = (panelW - btnW * 3 - ImGui.getStyle().getItemSpacingX() * 2) / 2f;
+        ImGui.setCursorPosX(Math.max(0f, startX));
+
+        toolButton("Mouse", Tool.MOUSE, btnW);
+        ImGui.sameLine();
+        toolButton("Pincel", Tool.BRUSH, btnW);
+        ImGui.sameLine();
+        toolButton("Borrador", Tool.ERASER, btnW);
+    }
+
+    private void toolButton(String text, Tool t, float w) {
+        boolean active = (tool == t);
+        if (active) ImGui.pushStyleColor(ImGuiCol.Button, 0xFFC8782D); // ABGR
+        if (ImGui.button(text, w, 34f)) selectTool(t);
+        if (active) ImGui.popStyleColor();
+    }
+
+    private void selectTool(Tool t) {
+        tool = t;
+        // mantener la fuerza dentro del rango de la herramienta
+        if (t == Tool.BRUSH && force[0] < 0f) force[0] = -force[0];
+        if (t == Tool.ERASER && force[0] > 0f) force[0] = -force[0];
+    }
+
+    // ------------------------------------------------------------------
+    // Panel derecho
+    // ------------------------------------------------------------------
+
+    private void renderRight(float w, float h) {
+        float editorH = h * 0.58f;
+
+        ImGui.beginChild("##editor", 0, editorH, false);
+        graphView.render(ImGui.getContentRegionAvailX(), editorH);
+        ImGui.endChild();
+
+        ImGui.separator();
+        renderDashboard();
+    }
+
+    private void renderDashboard() {
+        ImGui.text("Automata Gen");
+        ImGui.text("Q = " + graphView.getStatesLabel());
+        ImGui.textWrapped("lenguaje (sigma) = " + graphView.getLanguageLabel());
+        ImGui.text("Cantidad de estados: " + graphView.getStateCount());
+        // Estado actual: conectar cuando exista en el automata
+        ImGui.text("Estado actual: -");
+        ImGui.separator();
+        dashboardExtra.run(); // aqui va el recorrido de la matriz dispersa
     }
 }
