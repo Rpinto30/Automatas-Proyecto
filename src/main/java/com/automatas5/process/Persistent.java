@@ -1,9 +1,13 @@
 package com.automatas5.process;
 
+import com.automatas5.Views.Dimension.TerrainMesh;
+import com.automatas5.Views.GraphView;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -11,11 +15,9 @@ import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-
-import com.automatas5.Views.Dimension.TerrainMesh;
-import com.automatas5.Views.GraphView;
 
 /**
  * Persistencia del proyecto.
@@ -89,6 +91,22 @@ public final class Persistent {
         int loaded = view.loadState(nodes, edges);
         System.out.println("[Persistent] " + file + " cargado: " + loaded + " nodos, " + edges.size() + " aristas");
         return true;
+    }
+
+    /** Archivos .graph de la carpeta de trabajo y de graphs/ (si existe), ordenados por nombre. */
+    public static List<Path> listGraphFiles() {
+        List<Path> out = new ArrayList<>();
+        Path cwd = Paths.get(".");
+        for (Path dir : new Path[] { cwd, Paths.get("graphs") }) {
+            if (!Files.isDirectory(dir)) continue;
+            try (DirectoryStream<Path> ds = Files.newDirectoryStream(dir, "*.graph")) {
+                for (Path p : ds) out.add(dir.equals(cwd) ? p.getFileName() : p);
+            } catch (IOException ex) {
+                System.err.println("[Persistent] No se pudo listar " + dir + ": " + ex);
+            }
+        }
+        Collections.sort(out);
+        return out;
     }
 
     /** Guarda el automata en init.graph. @return true si se escribio. */

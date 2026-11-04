@@ -2,6 +2,8 @@ package com.automatas5.Views;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -23,6 +25,7 @@ import imgui.flag.ImGuiCol;
 import imgui.flag.ImGuiInputTextFlags;
 import imgui.flag.ImGuiWindowFlags;
 import imgui.type.ImInt;
+import imgui.type.ImString;
 
 /**
  * Ventana principal 1280x720.
@@ -43,15 +46,17 @@ public class MainView extends Application {
     public static final int WIDTH = 1280;
     public static final int HEIGHT = 720;
     /** Tamano minimo para que los paneles sigan siendo usables. */
+    /** Radio maximo del pincel. El automata reparte sus estados sobre cualquier radio. */
+    private static final int MAX_RADIUS = 50;
     private static final int MIN_WIDTH = 900;
     private static final int MIN_HEIGHT = 600;
 
     private static final int MIN_RES = 2;
-    private static final int MAX_RES = 100;
+    private static final int MAX_RES = 1000;
 
     // ---- estado de los widgets ----
     private final ImInt resolution = new ImInt(25);
-    private final int[] radius = {2};          // 1..10, solo enteros
+    private final int[] radius = {5};          // 1..MAX_RADIUS, solo enteros
     private final float[] force = {0.5f};      // -1..1
     private Tool tool = Tool.MOUSE;
 
@@ -79,9 +84,13 @@ public class MainView extends Application {
     private static final float PICK_RADIUS = 12f;      // px, igual que Viewport3D
     private static final float DRAG_MIN_PIXELS = 6f;   // el mouse debe moverse para pintar otro vertice
     private int[] lastPainted = null;
-    /** Resultado de la ultima exportacion .obj (se muestra bajo el viewer). */
-    private String exportMessage = "";
-    private boolean exportFailed = false;
+    /** Resultado de la ultima accion de la barra superior (exportar, cargar .graph, resetear). */
+    private String statusMessage = "";
+    private boolean statusFailed = false;
+    /** Archivos .graph encontrados al abrir el popup "Cargar .graph". */
+    private List<Path> graphFiles = new java.util.ArrayList<>();
+    private final ImString graphPathInput = new ImString(256);
+    private static final String GRAPH_POPUP = "##cargarGrafo";
     private float lastPaintMouseX, lastPaintMouseY;
 
     public MainView(Graph graph, Matrix matrix_) {
@@ -143,7 +152,7 @@ public class MainView extends Application {
 
     @Override
     protected void configure(Configuration config) {
-        config.setTitle("Automatas - Editor de gradientes");
+        config.setTitle("Automatas Proyecto 5");
     }
 
     @Override
@@ -208,6 +217,10 @@ public class MainView extends Application {
     // ------------------------------------------------------------------
 
     private void renderLeft(float w, float h) {
+        // ---- barra superior: cargar .graph | exportar .obj | resetear mapa ----
+        renderTopBar();
+        ImGui.separator();
+
         // ---- fila de parametros: Resolucion | Radio | Fuerza ----
         ImGui.columns(3, "##params", false);
 
@@ -223,7 +236,7 @@ public class MainView extends Application {
 
         ImGui.text("Radio");
         ImGui.setNextItemWidth(-1);
-        ImGui.sliderInt("##radio", radius, 1, 11);
+        ImGui.sliderInt("##radio", radius, 1, MAX_RADIUS);
         ImGui.nextColumn();
 
         ImGui.text("Fuerza");
@@ -240,7 +253,7 @@ public class MainView extends Application {
 
         // ---- espacio del editor 3D ----
         float toolbarH = 48f;
-        float infoH = ImGui.getTextLineHeightWithSpacing() * 2f + 4f;
+        float infoH = ImGui.getTextLineHeightWithSpacing() * 3f + 4f;
         float viewH = Math.max(60f, ImGui.getContentRegionAvailY() - toolbarH - infoH);
         float viewW = ImGui.getContentRegionAvailX();
 
@@ -295,14 +308,17 @@ public class MainView extends Application {
         if (same && !click) return;
 
         viewport.selectVertex(h[0], h[1]);
-        exportMessage = "";
+        statusMessage = "";
         onPaint.onPaint(radius[0], getEffectiveForce(), tool);
         lastPainted = h;
         lastPaintMouseX = mx;
         lastPaintMouseY = my;
     }
 
-    /** Linea 1: vertice, altura y simbolo. Linea 2: aviso del automata (ruta inexistente, estado faltante...). */
+    /**
+     * Linea 1: vertice, altura y simbolo. Linea 2: ruta mas rapida elegida por el automata en la ultima
+     * pincelada. Linea 3: avisos (ruta inexistente, estado faltante...) o el resultado de la ultima accion.
+     */
     private void renderSelectionInfo() {
         int[] v = (viewport != null) ? viewport.getSelectedVertex() : null;
         if (v != null) {
@@ -311,11 +327,26 @@ public class MainView extends Application {
         } else {
             ImGui.text("Sin vertice seleccionado (clic en el terreno)");
         }
+
+        List<Character> path = tools.getLastPath();
+        if (path.isEmpty()) {
+            ImGui.text("Ruta mas rapida: -");
+        } else {
+            StringBuilder sb = new StringBuilder("Ruta mas rapida: ");
+            for (int i = 0; i < path.size(); i++) {
+                if (i > 0) sb.append(", ");
+                char c = path.get(i);
+                sb.append(c == ' ' ? "(esp)" : String.valueOf(c));
+            }
+            sb.append("  [").append(path.size()).append(" estados]");
+            ImGui.text(sb.toString());
+        }
+
         String msg = tools.getLastMessage();
         if (!msg.isEmpty()) ImGui.textColored(1f, 0.6f, 0.3f, 1f, msg);
-        else if (!exportMessage.isEmpty()) {
-            if (exportFailed) ImGui.textColored(1f, 0.4f, 0.4f, 1f, exportMessage);
-            else ImGui.textColored(0.5f, 0.9f, 0.5f, 1f, exportMessage);
+        else if (!statusMessage.isEmpty()) {
+            if (statusFailed) ImGui.textColored(1f, 0.4f, 0.4f, 1f, statusMessage);
+            else ImGui.textColored(0.5f, 0.9f, 0.5f, 1f, statusMessage);
         } else ImGui.text("");
     }
 
@@ -351,9 +382,8 @@ public class MainView extends Application {
 
     private void renderToolbar(float panelW) {
         float btnW = 100f;
-        float exportW = 120f;
         float gap = ImGui.getStyle().getItemSpacingX();
-        float total = btnW * 3 + exportW + gap * 3;
+        float total = btnW * 3 + gap * 2;
         ImGui.setCursorPosX(Math.max(0f, (panelW - total) / 2f));
 
         toolButton("Mouse", Tool.MOUSE, btnW);
@@ -361,25 +391,99 @@ public class MainView extends Application {
         toolButton("Pincel", Tool.BRUSH, btnW);
         ImGui.sameLine();
         toolButton("Borrador", Tool.ERASER, btnW);
-        ImGui.sameLine();
-        // no es una herramienta: ejecuta una accion y no cambia la herramienta activa
-        if (ImGui.button("Exportar .obj", exportW, 34f)) exportTerrain();
     }
 
-    /** Exporta el terreno actual a exports/terreno_<fecha>.obj y deja el resultado en exportMessage. */
+    // ------------------------------------------------------------------
+    // Barra superior: acciones (no son herramientas)
+    // ------------------------------------------------------------------
+
+    private void renderTopBar() {
+        float w = 130f, h = 26f;
+        if (ImGui.button("Cargar .graph", w, h)) {
+            graphFiles = Persistent.listGraphFiles();
+            ImGui.openPopup(GRAPH_POPUP);
+        }
+        ImGui.sameLine();
+        if (ImGui.button("Exportar .obj", w, h)) exportTerrain();
+        ImGui.sameLine();
+        if (ImGui.button("Resetear mapa", w, h)) resetMap();
+
+        renderGraphPopup();
+    }
+
+    /** Popup con los .graph encontrados (carpeta actual y graphs/) y un campo para escribir otra ruta. */
+    private void renderGraphPopup() {
+        if (!ImGui.beginPopup(GRAPH_POPUP)) return;
+
+        ImGui.text("Archivos .graph (carpeta actual y graphs/)");
+        ImGui.separator();
+        if (graphFiles.isEmpty()) ImGui.textDisabled("No se encontraron archivos .graph");
+        for (Path f : graphFiles) {
+            if (ImGui.selectable(f.toString())) {
+                loadGraphFile(f);
+                ImGui.closeCurrentPopup();
+            }
+        }
+
+        ImGui.separator();
+        ImGui.text("Otra ruta:");
+        ImGui.setNextItemWidth(260f);
+        ImGui.inputText("##graphPath", graphPathInput);
+        ImGui.sameLine();
+        if (ImGui.button("Cargar")) {
+            String txt = graphPathInput.get().trim();
+            if (!txt.isEmpty()) {
+                loadGraphFile(Paths.get(txt));
+                ImGui.closeCurrentPopup();
+            }
+        }
+        ImGui.endPopup();
+    }
+
+    /** Reemplaza el automata actual por el del archivo (grafo de la UI y Graph quedan sincronizados). */
+    private void loadGraphFile(Path file) {
+        if (Persistent.loadGraph(graphView, file)) {
+            tools.clearLastPath();
+            statusMessage = "Grafo cargado: " + file + " (" + graphView.getNodeStates().size() + " nodos)";
+            statusFailed = false;
+        } else {
+            statusMessage = "No se pudo leer " + file;
+            statusFailed = true;
+        }
+    }
+
+    /** Deja todo el terreno en altura 0 y vacia la matriz dispersa. */
+    private void resetMap() {
+        if (viewport == null) {
+            statusMessage = "El viewer 3D aun no esta listo.";
+            statusFailed = true;
+            return;
+        }
+        int n = viewport.getSubdivisions() + 1;
+        for (int y = 0; y < n; y++) {
+            for (int x = 0; x < n; x++) viewport.setVertexHeight(x, y, 0);
+        }
+        matrix.clear();
+        lastPainted = null;
+        tools.clearLastPath();
+        statusMessage = "Mapa reiniciado a altura 0";
+        statusFailed = false;
+    }
+
+    /** Exporta el terreno actual a exports/terreno_<fecha>.obj y deja el resultado en statusMessage. */
     private void exportTerrain() {
         if (viewport == null) {
-            exportMessage = "El viewer 3D aun no esta listo.";
-            exportFailed = true;
+            statusMessage = "El viewer 3D aun no esta listo.";
+            statusFailed = true;
             return;
         }
         try {
             Path file = Persistent.exportObj(viewport.getTerrain());
-            exportMessage = "Exportado: " + file;
-            exportFailed = false;
+            statusMessage = "Exportado: " + file;
+            statusFailed = false;
         } catch (IOException ex) {
-            exportMessage = "No se pudo exportar: " + ex.getMessage();
-            exportFailed = true;
+            statusMessage = "No se pudo exportar: " + ex.getMessage();
+            statusFailed = true;
         }
     }
 

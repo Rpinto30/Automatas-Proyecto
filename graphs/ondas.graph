@@ -1,0 +1,24 @@
+# ondas: crestas concentricas (5,2,4,1,3,0 y -5,-2,-4,-1,-3,0)
+# se carga al iniciar si se copia como init.graph (con el programa cerrado)
+
+node q0 35 34.0 70.0 ; '#' h=-5
+node q1 42 86.0 70.0 ; '*' h=-2
+node q2 64 138.0 70.0 ; '@' h=-4
+node q3 59 190.0 70.0 ; ';' h=-1
+node q4 37 242.0 70.0 ; '%' h=-3
+node q5 58 294.0 70.0 ; ':' h=0
+node q6 44 294.0 140.0 ; ',' h=3
+node q7 33 242.0 140.0 ; '!' h=1
+node q8 46 190.0 140.0 ; '.' h=4
+node q9 45 138.0 140.0 ; '-' h=2
+node q10 32 86.0 140.0 ; (espacio) h=5
+edge q0 q1
+edge q1 q2
+edge q2 q3
+edge q3 q4
+edge q4 q5
+edge q5 q6
+edge q6 q7
+edge q7 q8
+edge q8 q9
+edge q9 q10

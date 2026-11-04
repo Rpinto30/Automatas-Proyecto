@@ -1,0 +1,29 @@
+# sombrero: seno de un ciclo, cresta - foso - suelo (requiere BLEND=false en Tools)
+# se carga al iniciar si se copia como init.graph (con el programa cerrado)
+
+node q0 32 197.0 281.0 ; (espacio)
+node q1 44 204.0 427.0 ; ','
+node q2 33 415.0 72.0 ; '!'
+node q3 59 367.0 178.0 ; ';'
+node q4 37 126.0 136.0 ; '%'
+node q5 35 303.0 306.0 ; '#'
+node q6 64 71.0 305.0 ; '@'
+node q7 42 583.0 264.0 ; '*'
+node q8 58 391.0 288.0 ; ':'
+node q9 46 324.0 251.0 ; '.'
+node q10 45 313.0 81.0 ; '-'
+edge q0 q2
+edge q0 q5
+edge q0 q6
+edge q1 q7
+edge q1 q6
+edge q1 q4
+edge q2 q10
+edge q2 q7
+edge q3 q9
+edge q3 q10
+edge q4 q6
+edge q4 q10
+edge q5 q8
+edge q5 q9
+edge q7 q8

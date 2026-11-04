@@ -1,0 +1,24 @@
+# volcan: el borde (anillo 1) supera al centro con . y @
+# se carga al iniciar si se copia como init.graph (con el programa cerrado)
+
+node q0 64 34.0 70.0 ; '@' h=-4
+node q1 35 86.0 70.0 ; '#' h=-5
+node q2 37 138.0 70.0 ; '%' h=-3
+node q3 42 190.0 70.0 ; '*' h=-2
+node q4 59 242.0 70.0 ; ';' h=-1
+node q5 58 294.0 70.0 ; ':' h=0
+node q6 33 294.0 140.0 ; '!' h=1
+node q7 45 242.0 140.0 ; '-' h=2
+node q8 44 190.0 140.0 ; ',' h=3
+node q9 32 138.0 140.0 ; (espacio) h=5
+node q10 46 86.0 140.0 ; '.' h=4
+edge q0 q1
+edge q1 q2
+edge q2 q3
+edge q3 q4
+edge q4 q5
+edge q5 q6
+edge q6 q7
+edge q7 q8
+edge q8 q9
+edge q9 q10

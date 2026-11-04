@@ -1,0 +1,23 @@
+# init.graph - configuracion del automata (se carga al iniciar, se guarda al cerrar)
+
+node q0 35 51.0 164.0 ; '#'
+node q1 64 125.0 70.0 ; '@'
+node q2 37 170.0 202.0 ; '%'
+node q3 42 200.0 56.0 ; '*'
+node q4 59 251.0 185.0 ; ';'
+node q5 58 307.0 70.0 ; ':'
+node q6 33 320.0 168.0 ; '!'
+node q7 45 365.0 83.0 ; '-'
+node q8 44 390.0 145.0 ; ','
+node q9 46 425.0 63.0 ; '.'
+node q10 32 454.0 161.0 ; (espacio)
+edge q0 q1
+edge q1 q2
+edge q2 q3
+edge q3 q4
+edge q4 q5
+edge q5 q6
+edge q6 q7
+edge q7 q8
+edge q8 q9
+edge q9 q10

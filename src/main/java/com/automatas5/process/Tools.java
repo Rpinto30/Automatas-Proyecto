@@ -1,5 +1,7 @@
 package com.automatas5.process;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.automatas5.Views.Dimension.Viewport3D;
@@ -26,6 +28,9 @@ public class Tools {
     /** Ultimo mensaje de error/aviso de ModificateTerrain ("" si todo salio bien). La UI lo muestra. */
     private String lastMessage = "";
 
+    /** Ultima ruta Dijkstra elegida (estado inicial -> ':'), para mostrarla en la UI. Vacia si no hubo. */
+    private List<Character> lastPath = Collections.emptyList();
+
     // Constructor
     public Tools(Graph grafo, Matrix matrix) {
         this.grafo = grafo;
@@ -47,6 +52,15 @@ public class Tools {
         return lastMessage;
     }
 
+    /** Ruta mas rapida usada en la ultima pincelada (del estado inicial al estado base ':'). */
+    public List<Character> getLastPath() {
+        return lastPath;
+    }
+
+    public void clearLastPath() {
+        lastPath = Collections.emptyList();
+    }
+
     /** Version sin herramienta: fuerza >= 0 se trata como pincel, fuerza < 0 como borrador. */
     public boolean ModificateTerrain(int radius, double force) {
         return ModificateTerrain(radius, force, force >= 0.0);
@@ -57,19 +71,21 @@ public class Tools {
      *
      * 1. Estado inicial = simbolo elegido por la fuerza (Automate.GetCharByForce). Siempre es el del centro.
      * 2. Se calcula con Dijkstra el camino de ese simbolo hasta el estado base ':' (altura 0).
-     * 3. Cada celda a distancia euclidiana d del centro (redondeada al anillo 0, 1, 2...) recibe el estado
-     *    numero d del camino. El centro es el estado 0 (el inicial); cada anillo avanza un estado.
-     * 4. El recorrido termina donde se acaba el radio o el camino: el estado final depende de cuantos estados
-     *    alcanza a recorrer. Si el radio es menor que el camino queda un escalon; si es mayor, las celdas
-     *    mas alla del ultimo estado no se tocan.
+     * 3. El camino (n estados) se REPARTE sobre los R anillos del radio: el anillo k (distancia euclidiana
+     *    redondeada al centro, 0..R) usa el estado round(k * (n-1) / R). Asi el centro es siempre el estado
+     *    inicial y el borde del radio siempre el estado base, para cualquier R:
+     *      - R mayor que n-1: cada estado se mantiene varios anillos (terrazas).
+     *      - R igual a n-1: un estado por anillo.
+     *      - R menor que n-1: se saltan estados (pendiente mas empinada).
      *
-     * @param radius Radio del pincel (1 a 10), en celdas
+     * @param radius Radio del pincel, en celdas
      * @param force  Fuerza: Borrador [-1.0, 0.0], Lapiz [0.0, 1.0]
      * @param raise  true = pincel (sube), false = borrador (baja); solo importa con BLEND
      * @return true si se modifico el terreno; si es false, getLastMessage() explica por que.
      */
     public boolean ModificateTerrain(int radius, double force, boolean raise) {
         lastMessage = "";
+        lastPath = Collections.emptyList();
         if (viewport == null || grafo == null || matrix == null) {
             lastMessage = "El viewer 3D aun no esta listo.";
             return false;
@@ -106,13 +122,24 @@ public class Tools {
             return false;
         }
 
+        lastPath = Collections.unmodifiableList(new ArrayList<>(camino));
+
+        // Reparto de los n estados sobre los anillos 0..R
+        final int n = camino.size();
+        final int R = Math.max(0, radius);
+        final int[] estadoDelAnillo = new int[R + 1];
+        for (int k = 0; k <= R; k++) {
+            estadoDelAnillo[k] = (R == 0) ? 0 : (int) Math.round((double) k * (n - 1) / R);
+        }
+
         // Recorrido radial: anillo = distancia euclidiana redondeada
-        for (int dy = -radius; dy <= radius; dy++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                int anillo = (int) Math.round(Math.hypot(dx, dy));
-                if (anillo > radius) continue;          // fuera del circulo
-                if (anillo >= camino.size()) continue;  // el automata no llega tan lejos
-                aplicarCambioVertice(xi + dx, yi + dy, camino.get(anillo), raise);
+        // (solo se recorre la parte del cuadrado que cae dentro de la malla)
+        final int size = matrix.getSize();
+        for (int y = Math.max(0, yi - R); y <= Math.min(size - 1, yi + R); y++) {
+            for (int x = Math.max(0, xi - R); x <= Math.min(size - 1, xi + R); x++) {
+                int anillo = (int) Math.round(Math.hypot(x - xi, y - yi));
+                if (anillo > R) continue; // fuera del circulo
+                aplicarCambioVertice(x, y, camino.get(estadoDelAnillo[anillo]), raise);
             }
         }
         return true;

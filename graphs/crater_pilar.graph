@@ -1,0 +1,34 @@
+# pilar: todos los estados conectados a : (solo se levanta el vertice central)
+# se carga al iniciar si se copia como init.graph (con el programa cerrado)
+
+node q0 58 170.0 110.0 ; ':'
+node q1 35 169.0 29.0 ; '#'
+node q2 64 249.4 45.3 ; '@'
+node q3 37 323.4 85.3 ; '%'
+node q4 42 303.4 160.7 ; '*'
+node q5 59 276.4 209.7 ; ';'
+node q6 33 169.0 240.0 ; '!'
+node q7 45 80.6 210.7 ; '-'
+node q8 44 59.6 157.7 ; ','
+node q9 46 41.6 85.3 ; '.'
+node q10 32 90.6 44.3 ; (espacio)
+edge q0 q1
+edge q0 q2
+edge q0 q3
+edge q0 q4
+edge q0 q5
+edge q0 q6
+edge q0 q7
+edge q0 q8
+edge q0 q9
+edge q0 q10
+edge q1 q10
+edge q1 q2
+edge q2 q3
+edge q3 q4
+edge q4 q5
+edge q5 q6
+edge q6 q7
+edge q7 q8
+edge q8 q9
+edge q9 q10
